@@ -1,9 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { Transaction } from '@mysten/sui/transactions'
 import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@mysten/dapp-kit'
-import { CONTRACT_CONFIG, COMMON_QUEUES, DEFAULT_STAKE_AMOUNT, MIN_STAKE_AMOUNT, MAX_PAYLOAD_SIZE, SUISCAN_BASE_URL } from '../constants/contract'
+import { 
+  CONTRACT_CONFIG,
+  CONTRACT_CONSTANTS, 
+  COMMON_QUEUES, 
+  DEFAULT_STAKE_AMOUNT, 
+  MIN_STAKE_AMOUNT, 
+  MAX_PAYLOAD_SIZE,
+  SUISCAN_BASE_URL 
+} from '../constants/contract'
+import { JobQueueService } from '../utils/jobQueueService'
+import type { JobSubmissionForm } from '../types'
 
 interface JobSubmissionProps {
   onJobSubmitted?: (jobId: string) => void
@@ -15,7 +24,7 @@ export function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
   const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction()
   
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<JobSubmissionForm>({
     jobId: '',
     queue: 'image-processing',
     payload: '',
@@ -35,19 +44,34 @@ export function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
     if (!formData.jobId.trim()) {
       return 'Job ID is required'
     }
+    if (formData.jobId.length > 100) {
+      return 'Job ID too long (max 100 characters)'
+    }
     if (!formData.queue.trim()) {
       return 'Queue name is required'
+    }
+    if (formData.queue.length > CONTRACT_CONSTANTS.MAX_QUEUE_NAME_LENGTH) {
+      return `Queue name too long (max ${CONTRACT_CONSTANTS.MAX_QUEUE_NAME_LENGTH} characters)`
     }
     if (!formData.payload.trim()) {
       return 'Job payload is required'
     }
-    if (formData.payload.length > MAX_PAYLOAD_SIZE) {
-      return `Payload too large (max ${MAX_PAYLOAD_SIZE} bytes)`
+    if (new Blob([formData.payload]).size > CONTRACT_CONSTANTS.MAX_PAYLOAD_SIZE) {
+      return `Payload too large (max ${CONTRACT_CONSTANTS.MAX_PAYLOAD_SIZE} bytes)`
     }
     
     const stakeInMist = parseFloat(formData.stakeAmount) * 1e9
     if (stakeInMist < MIN_STAKE_AMOUNT) {
       return `Minimum stake is ${MIN_STAKE_AMOUNT / 1e9} SUI`
+    }
+    
+    // Validate JSON if payload looks like JSON
+    if (formData.payload.trim().startsWith('{') || formData.payload.trim().startsWith('[')) {
+      try {
+        JSON.parse(formData.payload)
+      } catch {
+        return 'Invalid JSON format in payload'
+      }
     }
     
     return null
@@ -73,26 +97,19 @@ export function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
     setTransactionDigest(null)
 
     try {
-      const txb = new Transaction()
+      // Create JobQueueService instance
+      const jobService = new JobQueueService(suiClient, account.address)
       
       // Convert SUI to MIST (1 SUI = 1e9 MIST)
       const stakeInMist = Math.floor(parseFloat(formData.stakeAmount) * 1e9)
       
-      // Split coins for staking
-      const [stakeCoin] = txb.splitCoins(txb.gas, [txb.pure.u64(stakeInMist)])
-      
-      // Call submit_job function
-      txb.moveCall({
-        target: `${CONTRACT_CONFIG.PACKAGE_ID}::${CONTRACT_CONFIG.MODULE_NAME}::submit_job`,
-        arguments: [
-          txb.object(CONTRACT_CONFIG.MANAGER_OBJECT_ID),
-          txb.pure.string(formData.jobId),
-          txb.pure.string(formData.queue),
-          txb.pure.string(formData.payload),
-          stakeCoin,
-          txb.object(CONTRACT_CONFIG.CLOCK_OBJECT_ID)
-        ]
-      })
+      // Create transaction using the service
+      const txb = jobService.createSubmitJobTransaction(
+        formData.jobId,
+        formData.queue,
+        formData.payload,
+        stakeInMist
+      )
 
       signAndExecuteTransaction(
         {
@@ -186,10 +203,15 @@ export function JobSubmission({ onJobSubmitted }: JobSubmissionProps) {
               onChange={(e) => setFormData(prev => ({ ...prev, payload: e.target.value }))}
               placeholder='{"action": "process", "data": "your-data-here"}'
               rows={4}
-              maxLength={MAX_PAYLOAD_SIZE}
+              maxLength={CONTRACT_CONSTANTS.MAX_PAYLOAD_SIZE}
               required
             />
-            <small>{formData.payload.length}/{MAX_PAYLOAD_SIZE} characters</small>
+            <small>
+              {new Blob([formData.payload]).size}/{CONTRACT_CONSTANTS.MAX_PAYLOAD_SIZE} bytes
+              {formData.payload.trim().startsWith('{') || formData.payload.trim().startsWith('[') ? (
+                <span className="json-indicator"> ✓ JSON format detected</span>
+              ) : null}
+            </small>
           </div>
 
           <div className="form-group">

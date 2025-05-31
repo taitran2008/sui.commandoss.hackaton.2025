@@ -3,6 +3,8 @@
 import { WalletConnection } from './components/WalletConnection'
 import { JobSubmission } from './components/JobSubmission'
 import { JobMonitor } from './components/JobMonitor'
+import { WorkerManagement } from './components/WorkerManagement'
+import { ApiTester } from './components/ApiTester'
 
 export default function Home() {
   const handleJobSubmitted = (jobId: string) => {
@@ -10,13 +12,21 @@ export default function Home() {
     // You can add additional logic here, like refreshing the monitor
   }
 
+  const handleWorkerRegistered = (subscriptionId: string) => {
+    console.log('Worker registered:', subscriptionId)
+    // You can add additional logic here
+  }
+
   return (
     <div className="hero">
       <div className="container">
         <div>
           <h1 className="title">
-            Queue System on SUI Testnet
+            SUI Job Queue System
           </h1>
+          <p className="subtitle">
+            Decentralized job processing with SUI staking and priority queues
+          </p>
           
           {/* Wallet Connection Section */}
           <div className="card">
@@ -26,6 +36,16 @@ export default function Home() {
           {/* Job Submission Section */}
           <div className="card">
             <JobSubmission onJobSubmitted={handleJobSubmitted} />
+          </div>
+
+          {/* Worker Management Section */}
+          <div className="card">
+            <WorkerManagement onWorkerRegistered={handleWorkerRegistered} />
+          </div>
+
+          {/* API Comprehensive Tester Section */}
+          <div className="card">
+            <ApiTester />
           </div>
 
           {/* Job Monitoring Section */}

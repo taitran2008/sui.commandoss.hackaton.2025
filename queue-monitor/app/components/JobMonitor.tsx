@@ -2,27 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import { useCurrentAccount, useSuiClient } from '@mysten/dapp-kit'
-import { Transaction } from '@mysten/sui/transactions'
-import { CONTRACT_CONFIG, JOB_STATUS_LABELS, JOB_STATUS } from '../constants/contract'
-
-interface Job {
-  uuid: string
-  queue: string
-  payload: string
-  attempts: number
-  status: number
-  submitter: string
-  priority_stake: string
-  created_at: string
-  available_at: string
-  reserved_at?: string
-  error_message?: string
-}
-
-interface QueueStats {
-  total_jobs: number
-  pending_jobs: number
-}
+import { 
+  CONTRACT_CONFIG, 
+  JOB_STATUS_LABELS, 
+  JOB_STATUS, 
+  COMMON_QUEUES,
+  REFRESH_INTERVAL 
+} from '../constants/contract'
+import { JobQueueService } from '../utils/jobQueueService'
+import type { Job, QueueStats } from '../types'
 
 export function JobMonitor() {
   const account = useCurrentAccount()
@@ -30,37 +18,22 @@ export function JobMonitor() {
   
   const [jobs, setJobs] = useState<Job[]>([])
   const [queueStats, setQueueStats] = useState<Record<string, QueueStats>>({})
+  const [treasuryBalance, setTreasuryBalance] = useState<string>('0')
   const [searchJobId, setSearchJobId] = useState('')
-  const [selectedQueue, setSelectedQueue] = useState('image-processing')
+  const [selectedQueue, setSelectedQueue] = useState('all')
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+
+  const jobService = account ? new JobQueueService(suiClient, account.address) : null
 
   const fetchJobDetails = async (jobId: string) => {
-    if (!jobId.trim()) return null
+    if (!jobId.trim() || !jobService) return null
     
     try {
-      const txb = new Transaction()
-      txb.moveCall({
-        target: `${CONTRACT_CONFIG.PACKAGE_ID}::${CONTRACT_CONFIG.MODULE_NAME}::get_job`,
-        arguments: [
-          txb.object(CONTRACT_CONFIG.MANAGER_OBJECT_ID),
-          txb.pure.string(jobId)
-        ]
-      })
-
-      const result = await suiClient.devInspectTransactionBlock({
-        transactionBlock: txb,
-        sender: account?.address || '0x0'
-      })
-      
-      // Parse the result to extract job details
-      // Note: This is a simplified parsing - you may need to adjust based on the actual response format
-      if (result.results?.[0]?.returnValues) {
-        const jobData = result.results[0].returnValues[0]
-        return jobData
-      }
-      
-      return null
+      const result = await jobService.getJobDetails(jobId)
+      return result.success ? result.data : null
     } catch (error) {
       console.error('Error fetching job details:', error)
       return null
@@ -68,34 +41,33 @@ export function JobMonitor() {
   }
 
   const fetchQueueStats = async (queueName: string) => {
+    if (!jobService) return { total_jobs: 0, pending_jobs: 0 }
+    
     try {
-      const txb = new Transaction()
-      txb.moveCall({
-        target: `${CONTRACT_CONFIG.PACKAGE_ID}::${CONTRACT_CONFIG.MODULE_NAME}::get_queue_stats`,
-        arguments: [
-          txb.object(CONTRACT_CONFIG.MANAGER_OBJECT_ID),
-          txb.pure.string(queueName)
-        ]
-      })
-
-      const result = await suiClient.devInspectTransactionBlock({
-        transactionBlock: txb,
-        sender: account?.address || '0x0'
-      })
-      
-      // Parse queue statistics
-      if (result.results?.[0]?.returnValues) {
-        const [totalJobs, pendingJobs] = result.results[0].returnValues
-        return {
-          total_jobs: parseInt(String(totalJobs?.[0] || '0')),
-          pending_jobs: parseInt(String(pendingJobs?.[0] || '0'))
-        }
-      }
-      
-      return { total_jobs: 0, pending_jobs: 0 }
+      const result = await jobService.getQueueStats(queueName)
+      return result.success ? result.data! : { total_jobs: 0, pending_jobs: 0 }
     } catch (error) {
       console.error('Error fetching queue stats:', error)
       return { total_jobs: 0, pending_jobs: 0 }
+    }
+  }
+
+  const fetchTreasuryBalance = async () => {
+    if (!jobService) return
+
+    try {
+      console.log('Fetching treasury balance...')
+      const result = await jobService.getTreasuryBalance()
+      console.log('Treasury balance result:', result)
+      
+      if (result.success && result.data) {
+        setTreasuryBalance(result.data.balance)
+        console.log('Set treasury balance to:', result.data.balance)
+      } else {
+        console.warn('Treasury balance fetch failed:', result.error)
+      }
+    } catch (error) {
+      console.error('Error fetching treasury balance:', error)
     }
   }
 
@@ -109,52 +81,71 @@ export function JobMonitor() {
     setError(null)
 
     try {
-      // For now, we'll add a placeholder job for demonstration
-      // In a real implementation, you'd parse the actual response from the smart contract
-      const mockJob: Job = {
-        uuid: searchJobId,
-        queue: 'image-processing',
-        payload: '{"action": "process", "data": "example"}',
-        attempts: 1,
-        status: JOB_STATUS.PENDING,
-        submitter: account?.address || '',
-        priority_stake: '1000000000',
-        created_at: Date.now().toString(),
-        available_at: Date.now().toString()
-      }
-
-      setJobs(prev => {
-        const exists = prev.some(job => job.uuid === searchJobId)
-        if (!exists) {
-          return [mockJob, ...prev]
-        }
-        return prev.map(job => job.uuid === searchJobId ? mockJob : job)
-      })
+      const jobData = await fetchJobDetails(searchJobId)
       
-      setError('Note: This is mock data. Real job fetching will be implemented when the smart contract response format is confirmed.')
+      if (jobData) {
+        setJobs(prev => {
+          const exists = prev.some(job => job.uuid === searchJobId)
+          if (!exists) {
+            return [jobData, ...prev]
+          }
+          return prev.map(job => job.uuid === searchJobId ? jobData : job)
+        })
+        setError(null)
+      } else {
+        setError(`Job "${searchJobId}" not found`)
+      }
     } catch (error: any) {
-      setError(`Error: ${error.message}`)
+      setError(`Error searching for job: ${error.message}`)
     } finally {
       setIsLoading(false)
     }
   }
 
   const refreshQueueStats = async () => {
-    const queues = ['image-processing', 'data-analysis', 'email-notifications', 'file-conversion', 'backup-tasks']
+    setIsRefreshing(true)
     const stats: Record<string, QueueStats> = {}
     
-    for (const queue of queues) {
+    for (const queue of COMMON_QUEUES) {
       stats[queue] = await fetchQueueStats(queue)
     }
     
     setQueueStats(stats)
+    await fetchTreasuryBalance()
+    setLastRefresh(new Date())
+    setIsRefreshing(false)
   }
+
+  const refreshJobDetails = async () => {
+    if (jobs.length === 0) return
+
+    setIsRefreshing(true)
+    const updatedJobs = await Promise.all(
+      jobs.map(async (job) => {
+        const updated = await fetchJobDetails(job.uuid)
+        return updated || job
+      })
+    )
+    setJobs(updatedJobs)
+    setIsRefreshing(false)
+  }
+
+  const removeJob = (jobId: string) => {
+    setJobs(prev => prev.filter(job => job.uuid !== jobId))
+  }
+
+  const filteredJobs = selectedQueue === 'all' 
+    ? jobs 
+    : jobs.filter(job => job.queue === selectedQueue)
 
   useEffect(() => {
     if (account) {
       refreshQueueStats()
       // Set up auto-refresh every 15 seconds
-      const interval = setInterval(refreshQueueStats, 15000)
+      const interval = setInterval(() => {
+        refreshQueueStats()
+        refreshJobDetails()
+      }, REFRESH_INTERVAL)
       return () => clearInterval(interval)
     }
   }, [account])
@@ -168,6 +159,14 @@ export function JobMonitor() {
       case JOB_STATUS.DLQ: return '#ef4444'
       default: return '#6b7280'
     }
+  }
+
+  const formatSui = (mistAmount: string) => {
+    return (parseInt(mistAmount) / 1e9).toFixed(4)
+  }
+
+  const formatTimestamp = (timestamp: string) => {
+    return new Date(parseInt(timestamp)).toLocaleString()
   }
 
   if (!account) {
@@ -184,7 +183,35 @@ export function JobMonitor() {
   return (
     <div className="job-monitor-wrapper">
       <div className="job-monitor-card">
-        <h3>Job Monitor</h3>
+        <div className="monitor-header">
+          <h3>Job Monitor</h3>
+          <div className="monitor-actions">
+            {lastRefresh && (
+              <span className="last-refresh">
+                Last updated: {lastRefresh.toLocaleTimeString()}
+              </span>
+            )}
+            <button 
+              onClick={refreshQueueStats} 
+              disabled={isRefreshing}
+              className="refresh-btn"
+            >
+              {isRefreshing ? 'Refreshing...' : 'Refresh All'}
+            </button>
+          </div>
+        </div>
+
+        {/* Treasury Balance */}
+        <div className="treasury-section">
+          <h4>Treasury Balance</h4>
+          <div className="treasury-info">
+            <span className="treasury-amount">{formatSui(treasuryBalance)} SUI</span>
+            <small>Total funds held in contract</small>
+            {treasuryBalance === '125500000000' && (
+              <small className="dev-mode-indicator">🧪 Mock data (dev mode)</small>
+            )}
+          </div>
+        </div>
 
         {/* Queue Statistics */}
         <div className="queue-stats-section">
@@ -200,9 +227,6 @@ export function JobMonitor() {
               </div>
             ))}
           </div>
-          <button onClick={refreshQueueStats} className="refresh-stats-btn">
-            Refresh Stats
-          </button>
         </div>
 
         {/* Job Search */}
@@ -234,23 +258,61 @@ export function JobMonitor() {
 
         {/* Jobs List */}
         <div className="jobs-section">
-          <h4>Tracked Jobs</h4>
-          {jobs.length === 0 ? (
-            <p className="no-jobs">No jobs tracked yet. Search for a job to start monitoring.</p>
+          <div className="jobs-header">
+            <h4>Tracked Jobs ({filteredJobs.length})</h4>
+            <div className="job-filters">
+              <select
+                value={selectedQueue}
+                onChange={(e) => setSelectedQueue(e.target.value)}
+                className="queue-filter"
+              >
+                <option value="all">All Queues</option>
+                {COMMON_QUEUES.map(queue => (
+                  <option key={queue} value={queue}>{queue}</option>
+                ))}
+              </select>
+              {jobs.length > 0 && (
+                <button 
+                  onClick={refreshJobDetails}
+                  disabled={isRefreshing}
+                  className="refresh-jobs-btn"
+                >
+                  {isRefreshing ? 'Updating...' : 'Update Jobs'}
+                </button>
+              )}
+            </div>
+          </div>
+          
+          {filteredJobs.length === 0 ? (
+            <p className="no-jobs">
+              {jobs.length === 0 
+                ? 'No jobs tracked yet. Search for a job to start monitoring.' 
+                : 'No jobs match the selected filter.'}
+            </p>
           ) : (
             <div className="jobs-list">
-              {jobs.map((job) => (
+              {filteredJobs.map((job) => (
                 <div key={job.uuid} className="job-card">
                   <div className="job-header">
-                    <span className="job-id">{job.uuid}</span>
+                    <div className="job-id-section">
+                      <span className="job-id">{job.uuid}</span>
+                      <button 
+                        onClick={() => removeJob(job.uuid)}
+                        className="remove-job-btn"
+                        title="Remove from tracking"
+                      >
+                        ✕
+                      </button>
+                    </div>
                     <span 
                       className="job-status"
                       style={{ 
                         backgroundColor: getStatusColor(job.status),
                         color: 'white',
-                        padding: '2px 8px',
+                        padding: '4px 8px',
                         borderRadius: '4px',
-                        fontSize: '0.875rem'
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
                       }}
                     >
                       {JOB_STATUS_LABELS[job.status as keyof typeof JOB_STATUS_LABELS] || 'Unknown'}
@@ -260,20 +322,26 @@ export function JobMonitor() {
                   <div className="job-details">
                     <div className="job-row">
                       <span className="label">Queue:</span>
-                      <span>{job.queue}</span>
+                      <span className="queue-badge">{job.queue}</span>
                     </div>
                     <div className="job-row">
                       <span className="label">Attempts:</span>
-                      <span>{job.attempts}</span>
+                      <span>{job.attempts}/3</span>
                     </div>
                     <div className="job-row">
                       <span className="label">Stake:</span>
-                      <span>{(parseInt(job.priority_stake) / 1e9).toFixed(4)} SUI</span>
+                      <span className="stake-amount">{formatSui(job.priority_stake)} SUI</span>
                     </div>
                     <div className="job-row">
                       <span className="label">Created:</span>
-                      <span>{new Date(parseInt(job.created_at)).toLocaleString()}</span>
+                      <span>{formatTimestamp(job.created_at)}</span>
                     </div>
+                    {job.reserved_at && (
+                      <div className="job-row">
+                        <span className="label">Reserved:</span>
+                        <span>{formatTimestamp(job.reserved_at)}</span>
+                      </div>
+                    )}
                     {job.error_message && (
                       <div className="job-row">
                         <span className="label">Error:</span>
@@ -284,7 +352,7 @@ export function JobMonitor() {
                   
                   <details className="job-payload">
                     <summary>View Payload</summary>
-                    <pre>{job.payload}</pre>
+                    <pre className="payload-content">{job.payload}</pre>
                   </details>
                 </div>
               ))}
