@@ -2,3 +2,4 @@
 .github/
 queue-monitor/.next/*
 queue-monitor/node_modules/*
+queue-monitor/out/*
