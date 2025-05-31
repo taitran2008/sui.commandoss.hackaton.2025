@@ -86,22 +86,27 @@ export function WorkerManagement({ onWorkerRegistered }: WorkerManagementProps) 
             setTransactionDigest(txDigest)
             
             // Extract subscription ID from the result
-            // This is a placeholder - you'll need to parse the actual object ID from the transaction result
-            const newSubscriptionId = `worker_subscription_${Date.now()}`
-            setSubscriptionId(newSubscriptionId)
+            const newSubscriptionId = jobService.parseSubscriptionIdFromResult(result)
+            if (newSubscriptionId) {
+              setSubscriptionId(newSubscriptionId)
+            } else {
+              // Fallback for development
+              setSubscriptionId(`worker_subscription_${Date.now()}`)
+            }
             
             setSuccess('Worker registered successfully! You can now fetch jobs from the selected queues.')
             onWorkerRegistered?.(newSubscriptionId)
           },
           onError: (error: any) => {
             console.error('Failed to register worker:', error)
-            setError(`Failed to register worker: ${error.message}`)
+            const errorMessage = jobService.parseContractError(error)
+            setError(`Failed to register worker: ${errorMessage}`)
           }
         }
       )
     } catch (error: any) {
       console.error('Error registering worker:', error)
-      setError(`Error: ${error.message}`)
+      setError(`Error: ${error?.message || 'Unknown error occurred'}`)
     } finally {
       setIsRegistering(false)
     }
@@ -131,8 +136,7 @@ export function WorkerManagement({ onWorkerRegistered }: WorkerManagementProps) 
             console.log('Jobs fetched successfully:', result)
             
             // Parse job UUIDs from the result
-            // This is a placeholder - you'll need to parse the actual job UUIDs from the transaction result
-            const jobUuids = [`job_${Date.now()}_1`, `job_${Date.now()}_2`]
+            const jobUuids = jobService.parseJobUuidsFromResult(result)
             setFetchedJobs(jobUuids)
             
             if (jobUuids.length > 0) {
@@ -143,13 +147,14 @@ export function WorkerManagement({ onWorkerRegistered }: WorkerManagementProps) 
           },
           onError: (error: any) => {
             console.error('Failed to fetch jobs:', error)
-            setError(`Failed to fetch jobs: ${error.message}`)
+            const errorMessage = jobService.parseContractError(error)
+            setError(`Failed to fetch jobs: ${errorMessage}`)
           }
         }
       )
     } catch (error: any) {
       console.error('Error fetching jobs:', error)
-      setError(`Error: ${error.message}`)
+      setError(`Error: ${error?.message || 'Unknown error occurred'}`)
     } finally {
       setIsFetching(false)
     }
@@ -177,13 +182,14 @@ export function WorkerManagement({ onWorkerRegistered }: WorkerManagementProps) 
           },
           onError: (error: any) => {
             console.error('Failed to complete job:', error)
-            setError(`Failed to complete job: ${error.message}`)
+            const errorMessage = jobService.parseContractError(error)
+            setError(`Failed to complete job: ${errorMessage}`)
           }
         }
       )
     } catch (error: any) {
       console.error('Error completing job:', error)
-      setError(`Error: ${error.message}`)
+      setError(`Error: ${error?.message || 'Unknown error occurred'}`)
     }
   }
 
@@ -209,13 +215,14 @@ export function WorkerManagement({ onWorkerRegistered }: WorkerManagementProps) 
           },
           onError: (error: any) => {
             console.error('Failed to fail job:', error)
-            setError(`Failed to mark job as failed: ${error.message}`)
+            const errorMessage = jobService.parseContractError(error)
+            setError(`Failed to mark job as failed: ${errorMessage}`)
           }
         }
       )
     } catch (error: any) {
       console.error('Error failing job:', error)
-      setError(`Error: ${error.message}`)
+      setError(`Error: ${error?.message || 'Unknown error occurred'}`)
     }
   }
 

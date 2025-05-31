@@ -4,6 +4,7 @@ import { WalletConnection } from './components/WalletConnection'
 import { JobSubmission } from './components/JobSubmission'
 import { JobMonitor } from './components/JobMonitor'
 import { WorkerManagement } from './components/WorkerManagement'
+import { ApiTester } from './components/ApiTester'
 
 export default function Home() {
   const handleJobSubmitted = (jobId: string) => {
@@ -40,6 +41,11 @@ export default function Home() {
           {/* Worker Management Section */}
           <div className="card">
             <WorkerManagement onWorkerRegistered={handleWorkerRegistered} />
+          </div>
+
+          {/* API Comprehensive Tester Section */}
+          <div className="card">
+            <ApiTester />
           </div>
 
           {/* Job Monitoring Section */}

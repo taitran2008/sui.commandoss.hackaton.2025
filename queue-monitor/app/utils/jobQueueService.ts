@@ -305,6 +305,199 @@ export class JobQueueService {
   }
 
   /**
+   * Create a transaction for admin refund
+   */
+  createAdminRefundTransaction(jobUuid: string, reason: string): Transaction {
+    const txb = new Transaction()
+    
+    txb.moveCall({
+      target: `${CONTRACT_CONFIG.PACKAGE_ID}::${CONTRACT_CONFIG.MODULE_NAME}::admin_refund_job`,
+      arguments: [
+        txb.object(CONTRACT_CONFIG.MANAGER_OBJECT_ID),
+        txb.pure.string(jobUuid),
+        txb.pure.string(reason)
+      ]
+    })
+
+    return txb
+  }
+
+  /**
+   * Get all available queue names
+   */
+  getAvailableQueues(): string[] {
+    return [
+      'image-processing',
+      'data-analysis', 
+      'email-notifications',
+      'file-conversion',
+      'backup-tasks'
+    ]
+  }
+
+  /**
+   * Generate test payload for different queue types
+   */
+  generateTestPayload(queueType: string): string {
+    const payloads = {
+      'image-processing': {
+        action: 'resize',
+        image_url: 'https://example.com/sample-image.jpg',
+        dimensions: { width: 800, height: 600 },
+        format: 'webp'
+      },
+      'data-analysis': {
+        action: 'analyze',
+        dataset_url: 'https://example.com/dataset.csv',
+        analysis_type: 'statistical_summary',
+        parameters: { confidence_level: 0.95 }
+      },
+      'email-notifications': {
+        action: 'send_email',
+        recipient: 'user@example.com',
+        template: 'welcome_email',
+        variables: { username: 'TestUser', verification_code: '123456' }
+      },
+      'file-conversion': {
+        action: 'convert',
+        source_url: 'https://example.com/document.pdf',
+        target_format: 'docx',
+        options: { preserve_formatting: true }
+      },
+      'backup-tasks': {
+        action: 'backup',
+        source_path: '/data/important-files',
+        destination: 's3://backup-bucket/daily-backup',
+        compression: 'gzip'
+      }
+    }
+
+    return JSON.stringify(payloads[queueType as keyof typeof payloads] || payloads['image-processing'], null, 2)
+  }
+
+  /**
+   * Validate job payload format
+   */
+  validatePayload(payload: string): { isValid: boolean; error?: string } {
+    try {
+      const parsed = JSON.parse(payload)
+      
+      if (!parsed.action) {
+        return { isValid: false, error: 'Payload must include an "action" field' }
+      }
+      
+      const payloadSize = new Blob([payload]).size
+      if (payloadSize > 4096) {
+        return { isValid: false, error: `Payload size (${payloadSize} bytes) exceeds 4KB limit` }
+      }
+      
+      return { isValid: true }
+    } catch (error) {
+      return { isValid: false, error: 'Invalid JSON format' }
+    }
+  }
+
+  /**
+   * Estimate gas cost for different operations
+   */
+  estimateGasCost(operation: string): number {
+    const gasEstimates = {
+      'submit_job': 5000000,      // 5M MIST
+      'register_worker': 8000000,  // 8M MIST  
+      'fetch_jobs': 3000000,      // 3M MIST
+      'complete_job': 4000000,    // 4M MIST
+      'fail_job': 4000000,        // 4M MIST
+      'admin_refund': 5000000     // 5M MIST
+    }
+    
+    return gasEstimates[operation as keyof typeof gasEstimates] || 5000000
+  }
+
+  /**
+   * Parse job UUIDs from transaction result
+   */
+  parseJobUuidsFromResult(result: any): string[] {
+    try {
+      if (result?.effects?.events) {
+        const jobReservedEvents = result.effects.events
+          .filter((event: any) => event.type?.endsWith('::JobReserved'))
+          .map((event: any) => event.parsedJson?.uuid)
+          .filter(Boolean)
+        
+        return jobReservedEvents
+      }
+      
+      // Fallback: try to parse from other parts of result
+      if (result?.objectChanges) {
+        const createdObjects = result.objectChanges
+          .filter((change: any) => change.type === 'created')
+          .map((change: any) => change.objectId)
+        
+        return createdObjects
+      }
+      
+      return []
+    } catch (error) {
+      console.error('Error parsing job UUIDs from result:', error)
+      return []
+    }
+  }
+
+  /**
+   * Parse subscription ID from worker registration result
+   */
+  parseSubscriptionIdFromResult(result: any): string | null {
+    try {
+      if (result?.objectChanges) {
+        const createdSubscription = result.objectChanges
+          .find((change: any) => 
+            change.type === 'created' && 
+            change.objectType?.includes('WorkerSubscription')
+          )
+        
+        return createdSubscription?.objectId || null
+      }
+      
+      return null
+    } catch (error) {
+      console.error('Error parsing subscription ID from result:', error)
+      return null
+    }
+  }
+
+  /**
+   * Enhanced error handling for contract calls
+   */
+  parseContractError(error: any): string {
+    const errorMessage = error?.message || error?.toString() || 'Unknown error'
+    
+    // Map known error codes to user-friendly messages
+    if (errorMessage.includes('E_INVALID_PAYLOAD_SIZE')) {
+      return 'Payload size exceeds 4KB limit'
+    }
+    if (errorMessage.includes('E_INVALID_QUEUE_NAME')) {
+      return 'Queue name is empty or exceeds 255 characters'
+    }
+    if (errorMessage.includes('E_JOB_NOT_FOUND')) {
+      return 'Job not found'
+    }
+    if (errorMessage.includes('E_INVALID_BATCH_SIZE')) {
+      return 'Batch size must be between 1-50'
+    }
+    if (errorMessage.includes('E_UNAUTHORIZED_ACCESS')) {
+      return 'Worker not subscribed to this queue'
+    }
+    if (errorMessage.includes('E_INSUFFICIENT_TREASURY')) {
+      return 'Insufficient funds in treasury for refund'
+    }
+    if (errorMessage.includes('E_UNAUTHORIZED_REFUND')) {
+      return 'Cannot refund completed job'
+    }
+    
+    return errorMessage
+  }
+
+  /**
    * Utility function to parse job data from smart contract response
    */
   private parseJobData(rawData: any): Job {
