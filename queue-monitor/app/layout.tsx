@@ -3,8 +3,9 @@ import '@mysten/dapp-kit/dist/index.css'
 import { Providers } from './providers'
 
 export const metadata = {
-  title: 'Hello World - Walrus Site',
-  description: 'A Hello World Next.js static site deployed on SUI Walrus',
+  title: 'Queuing System',
+  description: 'A Decentralized Queuing System built on Sui'
+
 }
 
 export default function RootLayout({
