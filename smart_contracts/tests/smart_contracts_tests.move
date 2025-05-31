@@ -182,7 +182,7 @@ module smart_contracts::job_queue_tests {
         next_tx(&mut scenario, ADMIN);
         {
             let manager = test::take_shared<JobQueueManager>(&scenario);
-            let job = job_queue::get_job(&manager, string::utf8(b"job-uuid-payment"));
+            let _job = job_queue::get_job(&manager, string::utf8(b"job-uuid-payment"));
             
             // Job should be completed (status = 2)
             // Note: We can't directly access the status field, but the job exists and was completed
@@ -335,7 +335,7 @@ module smart_contracts::job_queue_tests {
         next_tx(&mut scenario, ADMIN);
         {
             let manager = test::take_shared<JobQueueManager>(&scenario);
-            let job = job_queue::get_job(&manager, string::utf8(b"job-uuid-cancel"));
+            let _job = job_queue::get_job(&manager, string::utf8(b"job-uuid-cancel"));
             
             // Job should be in DLQ status (cancelled)
             // Note: We can't directly access the status field, but the job exists

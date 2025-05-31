@@ -7,9 +7,9 @@ The Job Queue Smart Contract provides a decentralized job processing system on S
 ## Contract Information
 
 - **Network**: Sui Testnet
-- **Package ID**: `0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d`
+- **Package ID**: `0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8`
 - **Module Name**: `job_queue`
-- **JobQueueManager Object ID**: `0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc`
+- **JobQueueManager Object ID**: `0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35`
 
 ## Core Concepts
 
@@ -49,10 +49,10 @@ Submit a new job to the queue with SUI staking for priority.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function submit_job \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "unique-job-id-123" \
          "image-processing" \
          "{\"action\":\"resize\",\"image_url\":\"https://example.com/image.jpg\"}" \
@@ -101,6 +101,7 @@ Register as a worker to process jobs from specific queues.
 **Function**: `register_worker`
 
 **Parameters**:
+- `manager`: `&mut JobQueueManager` - The shared JobQueueManager object
 - `queues`: `vector<String>` - List of queue names to subscribe to
 - `batch_size`: `u64` - Max jobs to fetch at once (1-50)
 - `visibility_timeout`: `u64` - Seconds to reserve jobs
@@ -108,10 +109,11 @@ Register as a worker to process jobs from specific queues.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function register_worker \
-  --args "[\"image-processing\",\"data-analysis\"]" 10 300 \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
+         "[\"image-processing\",\"data-analysis\"]" 10 300 \
   --gas-budget 10000000
 ```
 
@@ -120,6 +122,7 @@ sui client call \
 txb.moveCall({
   target: `${PACKAGE_ID}::job_queue::register_worker`,
   arguments: [
+    txb.object(MANAGER_OBJECT_ID),
     txb.pure(["image-processing", "data-analysis"]),
     txb.pure(10), // batch_size
     txb.pure(300) // visibility_timeout in seconds
@@ -146,10 +149,10 @@ Fetch available jobs from a queue for processing.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function fetch_jobs \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          0x[WORKER_SUBSCRIPTION_ID] \
          "image-processing" \
          0x6 \
@@ -184,10 +187,10 @@ Mark a job as successfully completed.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function complete_job \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "unique-job-id-123" \
          0x6 \
   --gas-budget 5000000
@@ -234,10 +237,10 @@ Mark a job as failed with an error message.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function fail_job \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "unique-job-id-123" \
          "Image processing timeout" \
          0x6 \
@@ -283,10 +286,10 @@ Retrieve detailed information about a specific job.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function get_job \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "unique-job-id-123" \
   --gas-budget 1000000
 ```
@@ -319,10 +322,10 @@ Get statistics for a specific queue.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function get_queue_stats \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "image-processing" \
   --gas-budget 1000000
 ```
@@ -343,10 +346,10 @@ Get the total amount of SUI tokens currently held in the contract treasury.
 **CLI Command**:
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function get_treasury_balance \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
   --gas-budget 1000000
 ```
 
@@ -378,15 +381,62 @@ const result = await client.devInspectTransactionBlock({
 
 ---
 
-### 9. Admin Functions
+### 9. Get Total Worker Subscriptions
+
+Get the total number of worker subscriptions registered in the system.
+
+**Function**: `get_total_worker_subscriptions` (view function)
+
+**Parameters**:
+- `manager`: `&JobQueueManager`
+
+**CLI Command**:
+```bash
+sui client call \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
+  --module job_queue \
+  --function get_total_worker_subscriptions \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
+  --gas-budget 1000000
+```
+
+**TypeScript SDK Example**:
+```typescript
+import { TransactionBlock } from '@mysten/sui.js/transactions';
+
+const txb = new TransactionBlock();
+txb.moveCall({
+  target: `${PACKAGE_ID}::job_queue::get_total_worker_subscriptions`,
+  arguments: [
+    txb.object(MANAGER_OBJECT_ID)
+  ],
+});
+
+const result = await client.devInspectTransactionBlock({
+  transactionBlock: txb,
+  sender: '0x0'
+});
+```
+
+**Returns**: `u64` - Total number of worker subscriptions registered
+
+**Use Cases**:
+- Monitor worker participation in the system
+- Track platform growth and adoption
+- Analyze worker distribution across queues
+- System capacity planning and scaling decisions
+
+---
+
+### 10. Admin Functions
 
 #### Admin Refund
 ```bash
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function admin_refund_job \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "unique-job-id-123" \
          "Emergency refund due to system maintenance" \
   --gas-budget 5000000
@@ -554,16 +604,16 @@ client.subscribeEvent({
 ```bash
 # Check queue statistics
 sui client call \
-  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --package 0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8 \
   --module job_queue \
   --function get_queue_stats \
-  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --args 0xcb115e925c3f5f2935b9e91b8cd53a300621af0ee5651f6d49827d48ff614a35 \
          "your-queue-name" \
   --gas-budget 1000000
 ```
 
 ## Support
 
-- **Explorer**: https://testnet.suivision.xyz/package/0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d
+- **Explorer**: https://testnet.suivision.xyz/package/0x43d4e4b6cf4ec60b53a540f20b1d38ffadef990ecb1a66044602157d4acb6df8
 - **Source Code**: Available in the smart_contracts repository
 - **Network**: Sui Testnet
