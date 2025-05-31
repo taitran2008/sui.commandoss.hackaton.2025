@@ -1,4 +1,3 @@
-
 /// Module: Job Queue System
 /// 
 /// A decentralized job queue system that stores jobs as on-chain objects
@@ -19,6 +18,8 @@ module smart_contracts::job_queue {
     const E_JOB_NOT_FOUND: u64 = 3;
     const E_INVALID_BATCH_SIZE: u64 = 7;
     const E_UNAUTHORIZED_ACCESS: u64 = 8;
+    const E_INSUFFICIENT_TREASURY: u64 = 9;
+    const E_UNAUTHORIZED_REFUND: u64 = 10;
 
     // Constants
     const MAX_PAYLOAD_SIZE: u64 = 4096; // 4KB
@@ -99,6 +100,13 @@ module smart_contracts::job_queue {
         attempts: u16,
         error_message: String,
         moved_to_dlq: bool,
+    }
+
+    public struct StakeRefunded has copy, drop {
+        uuid: String,
+        submitter: address,
+        refund_amount: u64,
+        reason: String,
     }
 
     /// Initialize the job queue system
@@ -282,7 +290,7 @@ module smart_contracts::job_queue {
         fetched_jobs
     }
 
-    /// Mark job as completed
+    /// Mark job as completed - stake is kept as payment for successful processing
     public entry fun complete_job(
         manager: &mut JobQueueManager,
         job_uuid: String,
@@ -305,6 +313,9 @@ module smart_contracts::job_queue {
         // Mark as completed
         job.status = JOB_STATUS_COMPLETED;
         
+        // NOTE: Stake is kept in treasury as payment for successful job processing
+        // No refund for successful completion - this is the payment for the service
+        
         // Remove from queue (after releasing the mutable borrow)
         remove_job_from_queue(manager, &job_queue_copy, &job_uuid);
         
@@ -317,7 +328,7 @@ module smart_contracts::job_queue {
         });
     }
 
-    /// Mark job as failed with error message
+    /// Mark job as failed with error message and refund stake
     public entry fun fail_job(
         manager: &mut JobQueueManager,
         job_uuid: String,
@@ -338,6 +349,8 @@ module smart_contracts::job_queue {
         let job_queue_copy = job.queue;
         let job_uuid_copy = job.uuid;
         let initial_attempts = job.attempts;
+        let submitter = job.submitter;
+        let stake_amount = job.priority_stake;
         
         // Increment attempts
         job.attempts = job.attempts + 1;
@@ -348,11 +361,22 @@ module smart_contracts::job_queue {
         
         // Check if max attempts exceeded
         if (job.attempts >= (manager.max_attempts as u16)) {
-            // Move to DLQ
+            // Move to DLQ and refund the user since job failed permanently
             job.status = JOB_STATUS_DLQ;
             moved_to_dlq = true;
+            
+            // Refund the stake since job failed permanently
+            refund_stake(manager, submitter, stake_amount, string::utf8(b"Job moved to DLQ after max attempts"), ctx);
+            
+            // Emit refund event
+            event::emit(StakeRefunded {
+                uuid: job_uuid_copy,
+                submitter: submitter,
+                refund_amount: stake_amount,
+                reason: string::utf8(b"Job moved to DLQ after max attempts"),
+            });
         } else {
-            // Make available for retry
+            // Make available for retry - keep stake for potential retry
             job.status = JOB_STATUS_PENDING;
             job.available_at = current_time;
         };
@@ -440,6 +464,132 @@ module smart_contracts::job_queue {
             };
             i = i + 1;
         }
+    }
+
+    fun refund_stake(
+        manager: &mut JobQueueManager,
+        recipient: address,
+        amount: u64,
+        reason: String,
+        ctx: &mut TxContext
+    ) {
+        // Check if treasury has sufficient balance
+        assert!(balance::value(&manager.treasury) >= amount, E_INSUFFICIENT_TREASURY);
+        
+        // Extract coins from treasury and transfer to recipient
+        let refund_balance = balance::split(&mut manager.treasury, amount);
+        let refund_coin = coin::from_balance(refund_balance, ctx);
+        transfer::public_transfer(refund_coin, recipient);
+    }
+
+    /// Admin function to refund a specific job (emergency refund)
+    public entry fun admin_refund_job(
+        manager: &mut JobQueueManager,
+        job_uuid: String,
+        reason: String,
+        ctx: &mut TxContext
+    ) {
+        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
+        
+        let job = table::borrow(&manager.jobs, job_uuid);
+        let submitter = job.submitter;
+        let stake_amount = job.priority_stake;
+        let job_uuid_copy = job.uuid;
+        
+        // Only allow refund if job is not completed (completed jobs should keep payment)
+        assert!(job.status != JOB_STATUS_COMPLETED, E_UNAUTHORIZED_REFUND);
+        
+        // Refund the stake
+        refund_stake(manager, submitter, stake_amount, reason, ctx);
+        
+        // Emit refund event
+        event::emit(StakeRefunded {
+            uuid: job_uuid_copy,
+            submitter: submitter,
+            refund_amount: stake_amount,
+            reason: reason,
+        });
+    }
+
+    /// User function to cancel pending job and get refund
+    public entry fun cancel_job(
+        manager: &mut JobQueueManager,
+        job_uuid: String,
+        ctx: &mut TxContext
+    ) {
+        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
+        
+        let job = table::borrow_mut(&mut manager.jobs, job_uuid);
+        let submitter = tx_context::sender(ctx);
+        
+        // Only submitter can cancel their own job
+        assert!(job.submitter == submitter, E_UNAUTHORIZED_ACCESS);
+        
+        // Only allow cancellation of pending jobs
+        assert!(job.status == JOB_STATUS_PENDING, E_UNAUTHORIZED_REFUND);
+        
+        // Store values before mutations
+        let job_queue_copy = job.queue;
+        let job_uuid_copy = job.uuid;
+        let stake_amount = job.priority_stake;
+        
+        // Mark job as cancelled (we can reuse DLQ status or add a new status)
+        job.status = JOB_STATUS_DLQ;
+        
+        // Remove from queue
+        remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
+        
+        // Refund the stake
+        refund_stake(manager, submitter, stake_amount, string::utf8(b"Job cancelled by user"), ctx);
+        
+        // Emit refund event
+        event::emit(StakeRefunded {
+            uuid: job_uuid_copy,
+            submitter: submitter,
+            refund_amount: stake_amount,
+            reason: string::utf8(b"Job cancelled by user"),
+        });
+    }
+
+    /// Auto-refund for jobs that have been pending too long (timeout mechanism)
+    public entry fun refund_expired_job(
+        manager: &mut JobQueueManager,
+        job_uuid: String,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
+        
+        let job = table::borrow_mut(&mut manager.jobs, job_uuid);
+        let current_time = clock::timestamp_ms(clock) / 1000;
+        let expiry_time = 24 * 60 * 60; // 24 hours in seconds
+        
+        // Check if job has been pending for too long (24 hours)
+        assert!(job.status == JOB_STATUS_PENDING, E_UNAUTHORIZED_REFUND);
+        assert!(current_time - job.created_at > expiry_time, E_UNAUTHORIZED_REFUND);
+        
+        // Store values before mutations
+        let job_queue_copy = job.queue;
+        let job_uuid_copy = job.uuid;
+        let submitter = job.submitter;
+        let stake_amount = job.priority_stake;
+        
+        // Mark job as expired
+        job.status = JOB_STATUS_DLQ;
+        
+        // Remove from queue
+        remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
+        
+        // Refund the stake
+        refund_stake(manager, submitter, stake_amount, string::utf8(b"Job expired after 24 hours"), ctx);
+        
+        // Emit refund event
+        event::emit(StakeRefunded {
+            uuid: job_uuid_copy,
+            submitter: submitter,
+            refund_amount: stake_amount,
+            reason: string::utf8(b"Job expired after 24 hours"),
+        });
     }
 
     // Admin functions
