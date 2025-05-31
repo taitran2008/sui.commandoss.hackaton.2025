@@ -331,7 +331,54 @@ sui client call \
 
 ---
 
-### 8. Admin Functions
+### 8. Get Treasury Balance
+
+Get the total amount of SUI tokens currently held in the contract treasury.
+
+**Function**: `get_treasury_balance` (view function)
+
+**Parameters**:
+- `manager`: `&JobQueueManager`
+
+**CLI Command**:
+```bash
+sui client call \
+  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --module job_queue \
+  --function get_treasury_balance \
+  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --gas-budget 1000000
+```
+
+**TypeScript SDK Example**:
+```typescript
+import { TransactionBlock } from '@mysten/sui.js/transactions';
+
+const txb = new TransactionBlock();
+txb.moveCall({
+  target: `${PACKAGE_ID}::job_queue::get_treasury_balance`,
+  arguments: [
+    txb.object(MANAGER_OBJECT_ID)
+  ],
+});
+
+const result = await client.devInspectTransactionBlock({
+  transactionBlock: txb,
+  sender: '0x0'
+});
+```
+
+**Returns**: `u64` - Total treasury balance in MIST (smallest SUI unit)
+
+**Use Cases**:
+- Monitor total funds held in the contract
+- Track revenue from completed jobs
+- Verify treasury balance for administrative purposes
+- Calculate available funds for refunds
+
+---
+
+### 9. Admin Functions
 
 #### Admin Refund
 ```bash

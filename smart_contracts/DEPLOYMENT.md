@@ -68,6 +68,16 @@ sui client call \
   --gas-budget 1000000
 ```
 
+### Get Treasury Balance
+```bash
+sui client call \
+  --package 0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d \
+  --module job_queue \
+  --function get_treasury_balance \
+  --args 0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc \
+  --gas-budget 1000000
+```
+
 ## Sui Explorer Links
 - **Transaction**: https://testnet.suivision.xyz/txblock/D19rMw6CdU8bDLA8GvpgAhRVEAHrdLzFNhvbXxhipzPY
 - **Package**: https://testnet.suivision.xyz/package/0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d

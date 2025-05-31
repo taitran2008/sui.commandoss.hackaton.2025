@@ -108,3 +108,23 @@ sui move build
 - `MAX_BATCH_SIZE`: 50 jobs per fetch
 - `DEFAULT_VISIBILITY_TIMEOUT`: 300 seconds (5 minutes)
 - `DEFAULT_MAX_ATTEMPTS`: 3 retry attempts
+
+## Key Functions
+
+### Core Operations
+- `submit_job`: Submit a new job with SUI staking
+- `fetch_jobs`: Retrieve jobs for processing (worker function)
+- `complete_job`: Mark job as successfully completed
+- `fail_job`: Mark job as failed with retry logic
+
+### Monitoring & Analytics
+- `get_job`: Get detailed information about a specific job
+- `get_queue_stats`: Get statistics for a queue (total jobs, pending jobs)
+- `get_treasury_balance`: Get total SUI balance held in contract treasury
+
+### Administrative
+- `cancel_job`: Cancel a pending job (submitter only)
+- `refund_expired_job`: Auto-refund jobs pending for 24+ hours
+- `admin_refund_job`: Emergency refund (admin function)
+
+For detailed API documentation with examples, see [API_DOCUMENTATION.md](./API_DOCUMENTATION.md).
