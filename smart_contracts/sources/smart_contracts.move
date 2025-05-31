@@ -449,6 +449,11 @@ module smart_contracts::job_queue {
         (total_jobs, pending_jobs)
     }
 
+    /// Get total treasury balance amount
+    public fun get_treasury_balance(manager: &JobQueueManager): u64 {
+        balance::value(&manager.treasury)
+    }
+
     // Helper functions
     fun is_job_available(job: &Job, current_time: u64): bool {
         if (job.status != JOB_STATUS_PENDING) {
@@ -491,7 +496,7 @@ module smart_contracts::job_queue {
         manager: &mut JobQueueManager,
         recipient: address,
         amount: u64,
-        reason: String,
+        _reason: String,
         ctx: &mut TxContext
     ) {
         // Check if treasury has sufficient balance

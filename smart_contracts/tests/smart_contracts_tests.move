@@ -380,4 +380,78 @@ module smart_contracts::job_queue_tests {
 
         test::end(scenario);
     }
+
+    #[test]
+    fun test_treasury_balance() {
+        let mut scenario = test::begin(ADMIN);
+        
+        // Initialize the job queue manager
+        {
+            let ctx = test::ctx(&mut scenario);
+            job_queue::test_init(ctx);
+        };
+
+        // Check initial treasury balance (should be 0)
+        next_tx(&mut scenario, ADMIN);
+        {
+            let manager = test::take_shared<JobQueueManager>(&scenario);
+            let initial_balance = job_queue::get_treasury_balance(&manager);
+            assert!(initial_balance == 0, 1001);
+            test::return_shared(manager);
+        };
+
+        // Submit a job with stake
+        next_tx(&mut scenario, SUBMITTER1);
+        {
+            let mut manager = test::take_shared<JobQueueManager>(&scenario);
+            let clock = clock::create_for_testing(test::ctx(&mut scenario));
+            let stake_amount = 1000;
+            let stake = coin::mint_for_testing<SUI>(stake_amount, test::ctx(&mut scenario));
+            
+            job_queue::submit_job(
+                &mut manager,
+                string::utf8(b"treasury-test-job"),
+                string::utf8(b"test-queue"),
+                string::utf8(b"test-payload"),
+                stake,
+                &clock,
+                test::ctx(&mut scenario)
+            );
+            
+            // Check treasury balance after stake is added
+            let balance_after_stake = job_queue::get_treasury_balance(&manager);
+            assert!(balance_after_stake == stake_amount, 1002);
+            
+            test::return_shared(manager);
+            clock::destroy_for_testing(clock);
+        };
+
+        // Submit another job to increase treasury
+        next_tx(&mut scenario, SUBMITTER1);
+        {
+            let mut manager = test::take_shared<JobQueueManager>(&scenario);
+            let clock = clock::create_for_testing(test::ctx(&mut scenario));
+            let additional_stake = 2000;
+            let stake = coin::mint_for_testing<SUI>(additional_stake, test::ctx(&mut scenario));
+            
+            job_queue::submit_job(
+                &mut manager,
+                string::utf8(b"treasury-test-job-2"),
+                string::utf8(b"test-queue"),
+                string::utf8(b"test-payload-2"),
+                stake,
+                &clock,
+                test::ctx(&mut scenario)
+            );
+            
+            // Check total treasury balance
+            let total_balance = job_queue::get_treasury_balance(&manager);
+            assert!(total_balance == 3000, 1003); // 1000 + 2000
+            
+            test::return_shared(manager);
+            clock::destroy_for_testing(clock);
+        };
+
+        test::end(scenario);
+    }
 }
