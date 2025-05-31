@@ -1,7 +1,7 @@
 {
-  "name": "hello-world-walrus",
+  "name": "sui-job-queue-monitor",
   "version": "1.0.0",
-  "description": "",
+  "description": "A comprehensive monitoring dashboard for the SUI Job Queue smart contract system",
   "main": "index.js",
   "scripts": {
     "dev": "next dev",

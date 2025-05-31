@@ -30,10 +30,41 @@ export const COMMON_QUEUES = [
   'backup-tasks'
 ] as const
 
+// Contract Constants from API Documentation
+export const CONTRACT_CONSTANTS = {
+  MAX_PAYLOAD_SIZE: 4096, // bytes
+  MAX_QUEUE_NAME_LENGTH: 255, // characters
+  MAX_BATCH_SIZE: 50, // jobs per fetch
+  DEFAULT_VISIBILITY_TIMEOUT: 300, // seconds (5 minutes)
+  DEFAULT_MAX_ATTEMPTS: 3, // retry attempts before DLQ
+} as const
+
+// Error Codes from API Documentation
+export const ERROR_CODES = {
+  E_INVALID_PAYLOAD_SIZE: 1,
+  E_INVALID_QUEUE_NAME: 2,
+  E_JOB_NOT_FOUND: 3,
+  E_INVALID_BATCH_SIZE: 7,
+  E_UNAUTHORIZED_ACCESS: 8,
+  E_INSUFFICIENT_TREASURY: 9,
+  E_UNAUTHORIZED_REFUND: 10,
+} as const
+
 // Job creation defaults
 export const DEFAULT_STAKE_AMOUNT = 1000000000 // 1 SUI in MIST
 export const MIN_STAKE_AMOUNT = 1000 // 0.000001 SUI in MIST
-export const MAX_PAYLOAD_SIZE = 4096 // 4KB
+export const MAX_PAYLOAD_SIZE = CONTRACT_CONSTANTS.MAX_PAYLOAD_SIZE
+
+// Worker Configuration
+export const WORKER_CONFIG = {
+  MIN_BATCH_SIZE: 1,
+  MAX_BATCH_SIZE: CONTRACT_CONSTANTS.MAX_BATCH_SIZE,
+  DEFAULT_BATCH_SIZE: 10,
+  MIN_VISIBILITY_TIMEOUT: 60, // 1 minute
+  MAX_VISIBILITY_TIMEOUT: 3600, // 1 hour
+  DEFAULT_VISIBILITY_TIMEOUT: CONTRACT_CONSTANTS.DEFAULT_VISIBILITY_TIMEOUT,
+} as const
 
 // UI Configuration
 export const SUISCAN_BASE_URL = 'https://suiscan.xyz/testnet'
+export const REFRESH_INTERVAL = 15000 // 15 seconds for auto-refresh
