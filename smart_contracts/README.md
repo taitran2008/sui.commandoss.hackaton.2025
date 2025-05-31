@@ -11,6 +11,17 @@ This smart contract implements a sophisticated job queue system with the followi
 - **Worker Subscriptions**: Workers can subscribe to specific queues and fetch jobs in batches
 - **Error Handling**: Comprehensive retry mechanism with Dead Letter Queue (DLQ)
 - **Visibility Timeout**: Prevents job duplication during processing
+- **Fair Payment Model**: Users only pay when jobs are successfully processed
+
+## 💰 Payment & Refund System
+
+**Core Principle**: Users are only charged when their job is successfully completed. All other scenarios result in full refunds.
+
+- ✅ **Payment**: Stake kept only when job completes successfully
+- 💸 **Refund**: Full refund for failures, cancellations, expiry, or abandonment
+- 🔄 **Retry**: Stake held temporarily during retry attempts
+
+📖 **[Detailed Payment & Refund Documentation](./PAYMENT_REFUND_LOGIC.md)**
 
 ## Quick Start
 

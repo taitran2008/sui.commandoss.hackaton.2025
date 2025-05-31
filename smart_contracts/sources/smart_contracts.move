@@ -3,6 +3,25 @@
 /// A decentralized job queue system that stores jobs as on-chain objects
 /// and supports efficient processing by workers through named queues,
 /// prioritization, and error handling mechanisms.
+/// 
+/// ## Payment/Refund Logic:
+/// Users stake SUI tokens when submitting jobs. The payment logic is designed to be fair:
+/// 
+/// **PAYMENT (Stake Kept):**
+/// - Job completed successfully → User pays the staked amount as fee for service
+/// 
+/// **REFUND (Stake Returned):**
+/// - Job fails after max retry attempts → Full refund (service couldn't be provided)
+/// - Job cancelled by user (pending status) → Full refund (service not requested)
+/// - Job expires after 24 hours without processing → Full refund (service not provided)
+/// - Job abandoned by worker (visibility timeout exceeded) → Full refund if max attempts reached
+/// - Admin emergency refund → Full refund (admin intervention)
+/// 
+/// **RETRY (Stake Held):**
+/// - Job fails but has remaining attempts → Stake held for retry, refunded if ultimately fails
+/// - Job abandoned but has remaining attempts → Stake held for retry, refunded if ultimately fails
+/// 
+/// This ensures users only pay when their job is successfully processed.
 module smart_contracts::job_queue {
     use std::string::{Self, String};
     use sui::coin::{Self, Coin};
@@ -313,8 +332,9 @@ module smart_contracts::job_queue {
         // Mark as completed
         job.status = JOB_STATUS_COMPLETED;
         
-        // NOTE: Stake is kept in treasury as payment for successful job processing
-        // No refund for successful completion - this is the payment for the service
+        // PAYMENT: Stake is kept in treasury as payment for successful job processing
+        // This is the only case where the user's stake is not refunded
+        // The stake serves as payment for the successful completion of the job
         
         // Remove from queue (after releasing the mutable borrow)
         remove_job_from_queue(manager, &job_queue_copy, &job_uuid);
@@ -328,7 +348,7 @@ module smart_contracts::job_queue {
         });
     }
 
-    /// Mark job as failed with error message and refund stake
+    /// Mark job as failed with error message and refund stake appropriately
     public entry fun fail_job(
         manager: &mut JobQueueManager,
         job_uuid: String,
@@ -365,7 +385,7 @@ module smart_contracts::job_queue {
             job.status = JOB_STATUS_DLQ;
             moved_to_dlq = true;
             
-            // Refund the stake since job failed permanently
+            // REFUND: Job failed permanently after all retry attempts
             refund_stake(manager, submitter, stake_amount, string::utf8(b"Job moved to DLQ after max attempts"), ctx);
             
             // Emit refund event
@@ -377,6 +397,7 @@ module smart_contracts::job_queue {
             });
         } else {
             // Make available for retry - keep stake for potential retry
+            // NOTE: Stake remains in treasury until job either succeeds or exhausts all attempts
             job.status = JOB_STATUS_PENDING;
             job.available_at = current_time;
         };
@@ -487,7 +508,7 @@ module smart_contracts::job_queue {
         manager: &mut JobQueueManager,
         job_uuid: String,
         reason: String,
-        ctx: &mut TxContext
+        _ctx: &mut TxContext
     ) {
         assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
         
@@ -500,7 +521,7 @@ module smart_contracts::job_queue {
         assert!(job.status != JOB_STATUS_COMPLETED, E_UNAUTHORIZED_REFUND);
         
         // Refund the stake
-        refund_stake(manager, submitter, stake_amount, reason, ctx);
+        refund_stake(manager, submitter, stake_amount, reason, _ctx);
         
         // Emit refund event
         event::emit(StakeRefunded {
@@ -589,6 +610,84 @@ module smart_contracts::job_queue {
             submitter: submitter,
             refund_amount: stake_amount,
             reason: string::utf8(b"Job expired after 24 hours"),
+        });
+    }
+
+    /// Release reserved jobs that exceeded visibility timeout and refund if appropriate
+    public entry fun release_abandoned_job(
+        manager: &mut JobQueueManager,
+        job_uuid: String,
+        clock: &Clock,
+        _ctx: &mut TxContext
+    ) {
+        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
+        
+        let current_time = clock::timestamp_ms(clock) / 1000;
+        
+        // Store values before borrowing to avoid borrow checker issues
+        let (job_queue_copy, job_uuid_copy, submitter, stake_amount, current_attempts, should_refund) = {
+            let job = table::borrow_mut(&mut manager.jobs, job_uuid);
+            
+            // Check if job is reserved and visibility timeout exceeded
+            assert!(job.status == JOB_STATUS_RESERVED, E_UNAUTHORIZED_REFUND);
+            assert!(option::is_some(&job.reserved_at), E_UNAUTHORIZED_REFUND);
+            
+            let reserved_time = *option::borrow(&job.reserved_at);
+            let timeout_exceeded = current_time - reserved_time > manager.visibility_timeout;
+            assert!(timeout_exceeded, E_UNAUTHORIZED_REFUND);
+            
+            // Store values before mutations
+            let job_queue_copy = job.queue;
+            let job_uuid_copy = job.uuid;
+            let submitter = job.submitter;
+            let stake_amount = job.priority_stake;
+            let current_attempts = job.attempts;
+            
+            // Clear reservation and make available for retry
+            job.reserved_at = option::none();
+            
+            // Check if this would exceed max attempts (including the abandoned attempt)
+            let will_exceed_max_attempts = current_attempts + 1 >= (manager.max_attempts as u16);
+            
+            if (will_exceed_max_attempts) {
+                // Move to DLQ since job failed after max attempts (including abandoned)
+                job.status = JOB_STATUS_DLQ;
+                job.attempts = current_attempts + 1; // Count abandoned attempt
+            } else {
+                // Make available for retry
+                job.status = JOB_STATUS_PENDING;
+                job.available_at = current_time;
+                job.attempts = current_attempts + 1; // Count abandoned attempt
+            };
+            
+            (job_queue_copy, job_uuid_copy, submitter, stake_amount, current_attempts, will_exceed_max_attempts)
+        };
+        
+        // Now handle refund and queue removal without borrowing job
+        if (should_refund) {
+            // REFUND: Job abandoned and no more attempts allowed
+            refund_stake(manager, submitter, stake_amount, string::utf8(b"Job abandoned after visibility timeout and max attempts reached"), _ctx);
+            
+            // Emit refund event
+            event::emit(StakeRefunded {
+                uuid: job_uuid_copy,
+                submitter: submitter,
+                refund_amount: stake_amount,
+                reason: string::utf8(b"Job abandoned after visibility timeout and max attempts reached"),
+            });
+            
+            // Remove from queue
+            remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
+        };
+        
+        // Emit job failed event for the abandoned attempt
+        event::emit(JobFailed {
+            uuid: job_uuid_copy,
+            queue: job_queue_copy,
+            worker: @0x0, // No specific worker since it was abandoned
+            attempts: current_attempts + 1,
+            error_message: string::utf8(b"Job abandoned - visibility timeout exceeded"),
+            moved_to_dlq: should_refund,
         });
     }
 
