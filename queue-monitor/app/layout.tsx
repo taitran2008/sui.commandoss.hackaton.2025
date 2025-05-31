@@ -3,9 +3,8 @@ import '@mysten/dapp-kit/dist/index.css'
 import { Providers } from './providers'
 
 export const metadata = {
-  title: 'Queuing System',
-  description: 'A Decentralized Queuing System built on Sui'
-
+  title: 'Job Queue System - SUI Walrus',
+  description: 'A Decentralized Job Queue System built on Sui Blockchain'
 }
 
 export default function RootLayout({
