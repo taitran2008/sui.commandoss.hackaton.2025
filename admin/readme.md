@@ -1,1 +1,0 @@
-h1. Decentralized job queue system , using Sui Blockchain , with these core components.
