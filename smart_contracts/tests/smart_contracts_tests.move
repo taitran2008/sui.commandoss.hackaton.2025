@@ -1,12 +1,11 @@
 #[test_only]
 module smart_contracts::job_queue_tests {
     use smart_contracts::job_queue::{Self, JobQueueManager, WorkerSubscription};
-    use sui::test_scenario::{Self as test, Scenario, next_tx, ctx};
-    use sui::coin::{Self, Coin};
+    use sui::test_scenario::{Self as test, next_tx};
+    use sui::coin::{Self};
     use sui::sui::SUI;
-    use sui::clock::{Self, Clock};
+    use sui::clock::{Self};
     use std::string::{Self, String};
-    use std::vector;
 
     // Test addresses
     const ADMIN: address = @0x1234;
@@ -48,7 +47,7 @@ module smart_contracts::job_queue_tests {
         next_tx(&mut scenario, ADMIN);
         {
             let manager = test::take_shared<JobQueueManager>(&scenario);
-            let job = job_queue::get_job(&manager, string::utf8(b"job-uuid-1"));
+            let _job = job_queue::get_job(&manager, string::utf8(b"job-uuid-1"));
             
             // Basic verification that the job exists and has correct queue
             let (total_jobs, pending_jobs) = job_queue::get_queue_stats(&manager, string::utf8(b"test-queue"));
@@ -67,8 +66,8 @@ module smart_contracts::job_queue_tests {
         
         // Register a worker
         {
-            let queues = vector::empty<String>();
-            vector::push_back(&mut queues, string::utf8(b"test-queue"));
+            let mut queues = std::vector::empty<String>();
+            std::vector::push_back(&mut queues, string::utf8(b"test-queue"));
             
             job_queue::register_worker(
                 queues,

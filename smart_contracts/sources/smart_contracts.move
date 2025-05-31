@@ -115,6 +115,12 @@ module smart_contracts::job_queue {
         transfer::share_object(manager);
     }
 
+    /// Test initialization function for testing
+    #[test_only]
+    public fun test_init(ctx: &mut TxContext) {
+        init(ctx);
+    }
+
     /// Submit a new job to the queue with SUI staking for priority
     public entry fun submit_job(
         manager: &mut JobQueueManager,
@@ -217,17 +223,14 @@ module smart_contracts::job_queue {
         };
 
         let queue_jobs = table::borrow_mut(&mut manager.queue_jobs, queue_name);
-        let mut i = 0;
         let mut fetched_count = 0;
         
         // For now, we'll implement a simple priority system
         // In a production system, we'd implement a more sophisticated priority queue
-        let mut best_jobs = vector::empty<String>();
         let mut highest_stake = 0;
-        let mut earliest_time = 0;
         
         // First pass: find the highest stake amount
-        i = 0;
+        let mut i = 0;
         while (i < vector::length(queue_jobs)) {
             let job_uuid = *vector::borrow(queue_jobs, i);
             
