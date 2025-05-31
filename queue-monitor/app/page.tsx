@@ -1,3 +1,5 @@
+import { WalletConnection } from './components/WalletConnection'
+
 export default function Home() {
   return (
     <div className="hero">
@@ -28,6 +30,10 @@ export default function Home() {
                 </p>
               </div>
             </div>
+            
+            {/* Wallet Connection Section */}
+            <WalletConnection />
+            
             <div className="footer">
               <p>
                 Built with Next.js • Deployed on SUI Walrus • Generated at {new Date().toISOString()}
