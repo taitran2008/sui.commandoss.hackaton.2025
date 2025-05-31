@@ -62,19 +62,30 @@ module smart_contracts::job_queue_tests {
 
     #[test]
     fun test_worker_registration() {
-        let mut scenario = test::begin(WORKER1);
+        let mut scenario = test::begin(ADMIN);
+        
+        // Initialize the job queue manager
+        {
+            let ctx = test::ctx(&mut scenario);
+            job_queue::test_init(ctx);
+        };
         
         // Register a worker
+        next_tx(&mut scenario, WORKER1);
         {
+            let mut manager = test::take_shared<JobQueueManager>(&scenario);
             let mut queues = std::vector::empty<String>();
             std::vector::push_back(&mut queues, string::utf8(b"test-queue"));
             
             job_queue::register_worker(
+                &mut manager,
                 queues,
                 5, // batch size
                 300, // visibility timeout
                 test::ctx(&mut scenario)
             );
+            
+            test::return_shared(manager);
         };
 
         // Verify worker subscription was created
@@ -121,15 +132,19 @@ module smart_contracts::job_queue_tests {
         // Register worker
         next_tx(&mut scenario, WORKER1);
         {
+            let mut manager = test::take_shared<JobQueueManager>(&scenario);
             let mut queues = std::vector::empty<String>();
             std::vector::push_back(&mut queues, string::utf8(b"test-queue"));
             
             job_queue::register_worker(
+                &mut manager,
                 queues,
                 5, // batch size
                 300, // visibility timeout
                 test::ctx(&mut scenario)
             );
+            
+            test::return_shared(manager);
         };
 
         // Worker fetches and completes job
@@ -212,15 +227,19 @@ module smart_contracts::job_queue_tests {
         // Register worker
         next_tx(&mut scenario, WORKER1);
         {
+            let mut manager = test::take_shared<JobQueueManager>(&scenario);
             let mut queues = std::vector::empty<String>();
             std::vector::push_back(&mut queues, string::utf8(b"test-queue"));
             
             job_queue::register_worker(
+                &mut manager,
                 queues,
                 5, // batch size
                 300, // visibility timeout
                 test::ctx(&mut scenario)
             );
+            
+            test::return_shared(manager);
         };
 
         // Worker fetches and fails job multiple times (should trigger refund after max attempts)

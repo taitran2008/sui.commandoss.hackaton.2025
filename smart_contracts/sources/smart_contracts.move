@@ -75,6 +75,7 @@ module smart_contracts::job_queue {
         jobs: Table<String, Job>, // uuid -> Job
         queue_jobs: Table<String, vector<String>>, // queue_name -> job_uuids
         total_jobs: u64,
+        total_workers: u64,
         visibility_timeout: u64,
         max_attempts: u64,
         treasury: Balance<SUI>,
@@ -135,6 +136,7 @@ module smart_contracts::job_queue {
             jobs: table::new(ctx),
             queue_jobs: table::new(ctx),
             total_jobs: 0,
+            total_workers: 0,
             visibility_timeout: DEFAULT_VISIBILITY_TIMEOUT,
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             treasury: balance::zero(),
@@ -214,6 +216,7 @@ module smart_contracts::job_queue {
 
     /// Register worker for queue subscription
     public entry fun register_worker(
+        manager: &mut JobQueueManager,
         queues: vector<String>,
         batch_size: u64,
         visibility_timeout: u64,
@@ -228,6 +231,10 @@ module smart_contracts::job_queue {
             batch_size: batch_size,
             visibility_timeout: visibility_timeout,
         };
+        
+        // Increment worker counter
+        manager.total_workers = manager.total_workers + 1;
+        
         transfer::transfer(subscription, tx_context::sender(ctx));
     }
 
@@ -447,6 +454,11 @@ module smart_contracts::job_queue {
         };
         
         (total_jobs, pending_jobs)
+    }
+
+    /// Get total number of worker subscriptions
+    public fun get_total_worker_subscriptions(manager: &JobQueueManager): u64 {
+        manager.total_workers
     }
 
     /// Get total treasury balance amount
