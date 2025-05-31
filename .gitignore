@@ -4,3 +4,4 @@ queue-monitor/.next/*
 queue-monitor/node_modules/*
 queue-monitor/out/*
 
+smart_contracts/nodejs-test-client/node_modules/*
