@@ -16,7 +16,6 @@ A decentralized job queue system built on the Sui Blockchain, enabling trustless
 - **Blockchain**: Sui Blockchain (Move smart contracts)
 - **Testing**: Node.js
 - **Deployment**: IPFS, CloudFront
-- **Monitoring**: Real-time event tracking
 - **Storage**: Sui Blockchain for job data and state management
 
 
