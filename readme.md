@@ -8,6 +8,16 @@ A decentralized job queue system built on the Sui Blockchain, enabling trustless
 - **Web3 Link (IPFS)**: 
   - http://k51qzi5uqu5dlm9k7sqk5b1s2v7ns2mbdrn9no1jdsoy1bli1c4ots18sp32ov.ipns.localhost:8080/
   - https://ipfs.golinky.me/
+- **Share list job to your workers** append your wallet address to the URL: 
+  - https://dptm8b098wb3y.cloudfront.net/?host=0xaa48fcc27ae97f7eeeb9c45959174ed0ab8e22233ba366e6e09cf42c919578de
+
+## 📦 Tech Stack:
+- **Frontend**: Next.js, React, Tailwind CSS
+- **Blockchain**: Sui Blockchain (Move smart contracts)
+- **Testing**: Node.js
+- **Deployment**: IPFS, CloudFront
+- **Monitoring**: Real-time event tracking
+- **Storage**: Sui Blockchain for job data and state management
 
 ## 📋 Smart Contract Details
 
@@ -25,7 +35,7 @@ A decentralized job queue system built on the Sui Blockchain, enabling trustless
 - **Job Rejection**: Ability to reject unsatisfactory work and make jobs available again
 - **Storage Management**: Delete completed jobs to reclaim storage fees
 
-### Job Status System
+### Tested Senarios:
 - `0` - **PENDING** (available for claiming)
 - `1` - **CLAIMED** (worker assigned)
 - `2` - **COMPLETED** (work done, pending verification)
