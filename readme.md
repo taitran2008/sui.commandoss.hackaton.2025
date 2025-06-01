@@ -19,6 +19,72 @@ A decentralized job queue system built on the Sui Blockchain, enabling trustless
 - **Monitoring**: Real-time event tracking
 - **Storage**: Sui Blockchain for job data and state management
 
+
+## 📦 Tested Scenarios:
+
+```plaintext
+/**
+ * Case 1: Complete Job Queue Workflow Test
+ * 
+ * Scenario:
+ * 1. Alice submits a job: "Translate 100 words into French" with 0.1 SUI reward (30-minute timeout)
+ * 2. Bob claims the job and receives 30 minutes to complete it
+ * 3. Bob finishes it in 5 minutes
+ * 4. Alice checks the result and calls verify_and_release, transferring 0.1 SUI to Bob
+ * 5. The job object is deleted → storage rebate issued
+ */
+```
+
+```plaintext
+/**
+ * Case 2: Job Rejection and Reassignment Workflow Test
+ * 
+ * Scenario:
+ * 1. Alice submits a job: "Translate 100 words into French" with 0.1 SUI reward (30-minute timeout)
+ * 2. Bob claims the job and receives 30 minutes to complete it
+ * 3. Bob finishes it in 5 minutes
+ * 4. Alice checks the result and rejects it
+ * 5. Job becomes available again, and Carol claims it
+ * 6. Carol receives 30 minutes to complete the job
+ * 7. Carol finishes it in 5 minutes
+ * 8. Alice checks the result and calls verify_and_release, transferring 0.1 SUI to Carol
+ * 9. The job object is deleted → storage rebate issued
+ */
+```
+
+```plaintext
+/**
+ * Case 3: Job Timeout and Reassignment Workflow Test
+ * 
+ * Scenario:
+ * 1. Alice submits a job: "Translate 100 words into French" with 0.1 SUI reward (30-minute timeout)
+ * 2. Bob claims the job and receives 30 minutes to complete it
+ * 3. Bob finishes it in 45 minutes — OVERTIME!
+ * 4. Job is automatically rejected due to timeout
+ * 5. Job becomes available again, and Carol claims it
+ * 6. Carol receives 30 minutes to complete the job
+ * 7. Carol finishes it in 5 minutes
+ * 8. Alice checks the result and calls verify_and_release, transferring 0.1 SUI to Carol
+ * 9. The job object is deleted → storage rebate issued
+ */
+```
+
+```plaintext
+/**
+ * Case 4: Job Self-Verification and Cancellation Workflow Test
+ * 
+ * Scenario:
+ * 1. Alice submits a job: "Translate 100 words into French" with 0.1 SUI reward (30-minute timeout)
+ * 2. Alice realizes she made a mistake and wants to cancel it
+ * 3. Since only VERIFIED jobs can be deleted, Alice implements a "self-verification" workflow:
+ *    a) Alice claims her own job
+ *    b) Alice completes the job with a cancellation message
+ *    c) Alice verifies and releases payment to herself
+ *    d) Alice deletes the VERIFIED job to get storage rebate
+ * 4. This demonstrates the proper way to cancel a job in the smart contract system
+ */
+```
+
 ## 📋 Smart Contract Details
 
 **Package ID**: `0xb1ce95fa4ef1871449e1d474ff8c8986143e2f6f928a51a2ddef41833f0d4383`  
