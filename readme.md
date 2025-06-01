@@ -101,12 +101,6 @@ A decentralized job queue system built on the Sui Blockchain, enabling trustless
 - **Job Rejection**: Ability to reject unsatisfactory work and make jobs available again
 - **Storage Management**: Delete completed jobs to reclaim storage fees
 
-### Tested Senarios:
-- `0` - **PENDING** (available for claiming)
-- `1` - **CLAIMED** (worker assigned)
-- `2` - **COMPLETED** (work done, pending verification)
-- `3` - **VERIFIED** (payment released)
-
 ## 🔧 Smart Contract API Functions
 
 ### Core Transaction Functions
@@ -117,21 +111,7 @@ A decentralized job queue system built on the Sui Blockchain, enabling trustless
 - `reject_job` - Reject completed work and make job available again
 - `delete_job` - Remove job to reclaim storage fees
 
-### View Functions (Read-Only)
-- `get_job_details` - Get comprehensive job information
-- `get_pending_jobs_count` - Count of available jobs
-- `get_pending_job_ids` - List of available job IDs
-- `is_job_available` - Check if job can be claimed
-- `is_job_expired` - Check if job has timed out
 
-## 📊 Real-Time Events
-
-The system emits events for real-time monitoring:
-- `JobSubmitted` - New job posted
-- `JobClaimed` - Job assigned to worker
-- `JobCompleted` - Work submitted for verification
-- `JobVerified` - Payment released to worker
-- `JobRejected` - Work rejected, job made available again
 
 ## 🏗️ Project Structure
 
@@ -145,8 +125,6 @@ smart_contracts/       # Sui Move smart contracts
 ├── sources/          # Contract source code
 └── tests/           # Contract tests
 
-nodejs-test-client/    # Testing utilities
-└── test scripts      # Automated testing tools
 ```
 
 ## 💡 Key Benefits
