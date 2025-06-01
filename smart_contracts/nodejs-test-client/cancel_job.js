@@ -1,12 +1,18 @@
 /**
- * Case 1: Complete Job Queue Workflow Test
+ * Case 4: Job Self-Verification and Cancellation Workflow Test
  * 
  * Scenario:
  * 1. Alice submits a job: "Translate 100 words into French" with 0.1 SUI reward (30 min timeout)
- * 2. Bob claims the job and has 30 minutes to complete it
- * 3. Bob finishes it in 5 minutes (simulated with sleep)
- * 4. Alice checks the result and calls verify_and_release, transferring 0.1 SUI to Bob
- * 5. The job object is deleted → storage rebate issued
+ * 2. Alice realizes she made a mistake and wants to cancel it
+ * 3. Since only VERIFIED jobs can be deleted, Alice implements a "self-verification" workflow:
+ *    a) Alice claims her own job
+ *    b) Alice completes the job with a cancellation message
+ *    c) Alice verifies and releases payment to herself
+ *    d) Alice deletes the VERIFIED job to get storage rebate
+ * 4. This demonstrates the proper way to "cancel" a job in the smart contract system
+ * 
+ * Key Learning: The smart contract allows self-verification as a cancellation mechanism
+ * while maintaining payment integrity and preventing system abuse.
  */
 
 const { SuiClient, getFullnodeUrl } = require('@mysten/sui/client');
@@ -68,25 +74,21 @@ async function getSuiBalance(address) {
 }
 
 // Main test function
-async function runCase1Test() {
-    console.log('🚀 Starting Case 1: Complete Job Queue Workflow Test');
+async function runCancelJobTest() {
+    console.log('🚀 Starting Case 4: Job Self-Verification Cancellation Test');
     console.log('=' .repeat(60));
     
     try {
-        // Load wallets
-        console.log('📝 Loading wallets...');
+        // Load wallet
+        console.log('📝 Loading wallet...');
         const alice = loadWallet('Alice');
-        const bob = loadWallet('Bob');
         
         console.log(`👩 Alice address: ${alice.address}`);
-        console.log(`👨 Bob address: ${bob.address}`);
         
-        // Check initial balances
+        // Check initial balance
         const aliceInitialBalance = await getSuiBalance(alice.address);
-        const bobInitialBalance = await getSuiBalance(bob.address);
         
         console.log(`💰 Alice initial balance: ${aliceInitialBalance.toFixed(4)} SUI`);
-        console.log(`💰 Bob initial balance: ${bobInitialBalance.toFixed(4)} SUI`);
         console.log('');
         
         // Step 1: Alice submits a job
@@ -98,7 +100,8 @@ async function runCase1Test() {
             language_pair: "en-fr",
             word_count: 100,
             urgency: "standard",
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            note: "This job contains a mistake and will be cancelled via self-verification"
         });
         
         console.log(`🆔 Job UUID: ${jobUuid}`);
@@ -162,19 +165,33 @@ async function runCase1Test() {
         console.log('⏳ Waiting for object to be finalized...');
         await sleep(3);
         
-        // Verify the job object exists before claiming
+        // Verify the job object exists and check its status
         try {
             const jobObject = await client.getObject({
                 id: jobId,
                 options: { showContent: true }
             });
             console.log(`🔍 Job object status: ${jobObject.data ? 'exists' : 'not found'}`);
+            
+            if (jobObject.data && jobObject.data.content) {
+                const jobFields = jobObject.data.content.fields;
+                console.log(`🔍 Job status: ${jobFields.status} (Expected: 0 for PENDING)`);
+                console.log(`🔍 Job submitter: ${jobFields.submitter}`);
+                console.log(`🔍 Job reward: ${jobFields.reward.fields.value} MIST`);
+            }
         } catch (error) {
             console.log(`⚠️ Warning: Could not verify job object: ${error.message}`);
         }
+        console.log('');
         
-        // Step 2: Bob claims the job
-        console.log('🎯 Step 2: Bob claims the job...');
+        // Step 2: Alice realizes there's a mistake and decides to cancel via self-verification
+        console.log('🛑 Step 2: Alice realizes there\'s a mistake and cancels via self-verification...');
+        console.log('💭 Alice: "Oh no! I made a mistake in the job description. I\'ll cancel this by self-verifying."');
+        console.log('📝 Strategy: Claim → Complete → Verify → Delete workflow');
+        console.log('');
+        
+        // Step 3: Alice claims her own job
+        console.log('🎯 Step 3: Alice claims her own job...');
         const claimTxb = new Transaction();
         claimTxb.moveCall({
             target: `${PACKAGE_ID}::job_queue::claim_job`,
@@ -187,7 +204,7 @@ async function runCase1Test() {
         
         const claimResult = await client.signAndExecuteTransaction({
             transaction: claimTxb,
-            signer: bob.keypair,
+            signer: alice.keypair,
             options: {
                 showEffects: true,
                 showEvents: true,
@@ -195,10 +212,10 @@ async function runCase1Test() {
         });
         
         if (!isTransactionSuccessful(claimResult)) {
-            throw new Error('Job claim failed');
+            throw new Error('Job claiming failed');
         }
         
-        console.log('✅ Job claimed successfully by Bob!');
+        console.log('✅ Alice successfully claimed her own job!');
         
         // Check for JobClaimed event
         const claimEvent = claimResult.events?.find(e => e.type.includes('JobClaimed'));
@@ -207,27 +224,25 @@ async function runCase1Test() {
         }
         console.log('');
         
-        // Step 3: Bob works on the job (simulate 5 minutes of work)
-        console.log('⏳ Step 3: Bob is working on the translation (simulating 5 minutes)...');
-        await sleep(5); // Sleep for 5 seconds to simulate 5 minutes of work
-        console.log('✅ Bob completed the work!');
-        console.log('');
+        // Wait a moment for the claim to be finalized
+        console.log('⏳ Waiting for claim to be finalized...');
+        await sleep(3);
         
-        // Step 4: Bob submits the completed work
-        console.log('📤 Step 4: Bob submits the completed translation...');
+        // Step 4: Alice completes the job with a cancellation message
+        console.log('✅ Step 4: Alice marks the job as completed with cancellation message...');
         const completeTxb = new Transaction();
         completeTxb.moveCall({
             target: `${PACKAGE_ID}::job_queue::complete_job`,
             arguments: [
                 completeTxb.object(jobId),
-                completeTxb.pure.string("Traduire cent mots en français - Translation completed!"),
+                completeTxb.pure.string("JOB CANCELLED BY SUBMITTER - Self-verification for deletion"),
                 completeTxb.object(CLOCK_ID),
             ],
         });
         
         const completeResult = await client.signAndExecuteTransaction({
             transaction: completeTxb,
-            signer: bob.keypair,
+            signer: alice.keypair,
             options: {
                 showEffects: true,
                 showEvents: true,
@@ -238,7 +253,7 @@ async function runCase1Test() {
             throw new Error('Job completion failed');
         }
         
-        console.log('✅ Job completed successfully!');
+        console.log('✅ Alice marked the job as completed with cancellation message!');
         
         // Check for JobCompleted event
         const completeEvent = completeResult.events?.find(e => e.type.includes('JobCompleted'));
@@ -247,85 +262,12 @@ async function runCase1Test() {
         }
         console.log('');
         
-        // DEBUG: Check job object state after completion
-        console.log('🔍 DEBUG: Checking job object state after completion...');
-        try {
-            const jobObjectAfterComplete = await client.getObject({
-                id: jobId,
-                options: { showContent: true }
-            });
-            if (jobObjectAfterComplete.data && jobObjectAfterComplete.data.content) {
-                const jobFields = jobObjectAfterComplete.data.content.fields;
-                console.log(`🔍 Job status after completion: ${jobFields.status}`);
-                console.log(`🔍 Job result: ${jobFields.result ? jobFields.result : 'None'}`);
-                console.log(`🔍 Job worker: ${jobFields.worker ? jobFields.worker : 'None'}`);
-            }
-        } catch (error) {
-            console.log(`⚠️ Could not inspect job object: ${error.message}`);
-        }
-        console.log('');
-        
-        // Step 5: Alice checks the result and verifies
-        console.log('🔍 Step 5: Alice reviews the work result...');
-        
-        // Get job details to see the result
-        const jobDetailsTxb = new Transaction();
-        jobDetailsTxb.moveCall({
-            target: `${PACKAGE_ID}::job_queue::get_job_details`,
-            arguments: [jobDetailsTxb.object(jobId)],
-        });
-        
-        const jobDetailsResult = await client.devInspectTransactionBlock({
-            transactionBlock: jobDetailsTxb,
-            sender: alice.address,
-        });
-        
-        if (jobDetailsResult.results && jobDetailsResult.results[0]) {
-            const returnValues = jobDetailsResult.results[0].returnValues;
-            if (returnValues && returnValues.length >= 5) {
-                // Parse the result (it's the 5th element, index 4)
-                const resultBytes = returnValues[4][0];
-                if (resultBytes && resultBytes.length > 1) {
-                    // Skip the first byte (vector length) and convert rest to string
-                    const resultStr = Buffer.from(resultBytes.slice(1)).toString('utf8');
-                    console.log(`📄 Work Result: "${resultStr}"`);
-                } else {
-                    console.log('📄 Work Result: (empty or not available)');
-                }
-            } else {
-                console.log('📄 Work Result: (unable to parse return values)');
-            }
-        } else {
-            console.log('📄 Work Result: (transaction inspection failed)');
-        }
-        
-        console.log('✅ Alice is satisfied with the work and will release payment...');
-        console.log('');
-        
-        // Wait a moment to ensure completion is finalized
+        // Wait a moment for the completion to be finalized
         console.log('⏳ Waiting for completion to be finalized...');
         await sleep(3);
         
-        // DEBUG: Final check of job status before verification
-        console.log('🔍 DEBUG: Final check of job status before verification...');
-        try {
-            const jobObjectBeforeVerify = await client.getObject({
-                id: jobId,
-                options: { showContent: true }
-            });
-            if (jobObjectBeforeVerify.data && jobObjectBeforeVerify.data.content) {
-                const jobFields = jobObjectBeforeVerify.data.content.fields;
-                console.log(`🔍 Job status before verification: ${jobFields.status}`);
-                console.log(`🔍 Expected status for COMPLETED: 2`);
-                console.log(`🔍 Job result: ${jobFields.result ? JSON.stringify(jobFields.result) : 'None'}`);
-            }
-        } catch (error) {
-            console.log(`⚠️ Could not inspect job object before verification: ${error.message}`);
-        }
-        console.log('');
-        
-        // Step 6: Alice verifies and releases payment
-        console.log('💸 Step 6: Alice verifies and releases 0.1 SUI payment to Bob...');
+        // Step 5: Alice verifies and releases payment to herself
+        console.log('💸 Step 5: Alice verifies and releases payment to herself...');
         const verifyTxb = new Transaction();
         verifyTxb.moveCall({
             target: `${PACKAGE_ID}::job_queue::verify_and_release`,
@@ -348,7 +290,7 @@ async function runCase1Test() {
             throw new Error('Job verification failed');
         }
         
-        console.log('✅ Payment released successfully!');
+        console.log('✅ Alice verified and released payment to herself!');
         
         // Check for JobVerified event
         const verifyEvent = verifyResult.events?.find(e => e.type.includes('JobVerified'));
@@ -357,26 +299,12 @@ async function runCase1Test() {
         }
         console.log('');
         
-        // DEBUG: Check job object state after verification
-        console.log('🔍 DEBUG: Checking job object state after verification...');
+        // Wait a moment for the verification to be finalized
+        console.log('⏳ Waiting for verification to be finalized...');
         await sleep(3);
-        try {
-            const jobObjectAfterVerify = await client.getObject({
-                id: jobId,
-                options: { showContent: true }
-            });
-            if (jobObjectAfterVerify.data && jobObjectAfterVerify.data.content) {
-                const jobFields = jobObjectAfterVerify.data.content.fields;
-                console.log(`🔍 Job status after verification: ${jobFields.status}`);
-                console.log(`🔍 Expected status for VERIFIED: 3`);
-            }
-        } catch (error) {
-            console.log(`⚠️ Could not inspect job object after verification: ${error.message}`);
-        }
-        console.log('');
         
-        // Step 7: Delete the job for storage rebate
-        console.log('🗑️  Step 7: Deleting job to reclaim storage rebate...');
+        // Step 6: Alice deletes the VERIFIED job to get storage rebate
+        console.log('🗑️ Step 6: Alice deletes the VERIFIED job to reclaim storage rebate...');
         const deleteTxb = new Transaction();
         deleteTxb.moveCall({
             target: `${PACKAGE_ID}::job_queue::delete_job`,
@@ -399,22 +327,50 @@ async function runCase1Test() {
         console.log('✅ Job deleted successfully! Storage rebate issued.');
         console.log('');
         
-        // Check final balances
-        console.log('💰 Final Balance Check:');
-        const aliceFinalBalance = await getSuiBalance(alice.address);
-        const bobFinalBalance = await getSuiBalance(bob.address);
+        // Step 7: Final balance check and verification
+        console.log('💰 Step 7: Final Balance Check and System State:');
         
-        console.log(`👩 Alice final balance: ${aliceFinalBalance.toFixed(4)} SUI (Change: ${(aliceFinalBalance - aliceInitialBalance).toFixed(4)} SUI)`);
-        console.log(`👨 Bob final balance: ${bobFinalBalance.toFixed(4)} SUI (Change: ${(bobFinalBalance - bobInitialBalance).toFixed(4)} SUI)`);
+        // Check that the job object no longer exists
+        try {
+            const jobObjectAfterDelete = await client.getObject({
+                id: jobId,
+                options: { showContent: true }
+            });
+            
+            if (jobObjectAfterDelete.data) {
+                console.log(`⚠️ Unexpected: Job object still exists after deletion`);
+            } else {
+                console.log(`✅ Job object successfully deleted from blockchain`);
+            }
+        } catch (error) {
+            console.log(`✅ Job object successfully deleted (no longer exists on chain)`);
+        }
+        
+        // Check final balance
+        const aliceFinalBalance = await getSuiBalance(alice.address);
+        const balanceChange = aliceFinalBalance - aliceInitialBalance;
+        
+        console.log(`👩 Alice final balance: ${aliceFinalBalance.toFixed(4)} SUI`);
+        console.log(`💸 Balance change: ${balanceChange.toFixed(4)} SUI`);
+        
+        if (balanceChange >= -0.01) { // Should be close to original due to self-payment
+            console.log('📊 Alice successfully recovered her 0.1 SUI reward through self-verification');
+            console.log('📝 Only gas fees were deducted for the cancellation workflow');
+        }
         
         console.log('');
-        console.log('🎉 Case 1 Test Completed Successfully!');
+        console.log('🎉 Case 4 Test Completed Successfully!');
         console.log('Summary:');
         console.log('- ✅ Alice submitted a translation job with 0.1 SUI reward');
-        console.log('- ✅ Bob claimed and completed the job within 30 minutes');
-        console.log('- ✅ Alice verified the work and released payment');
-        console.log('- ✅ Job was deleted and storage rebate was issued');
-        console.log('- ✅ Bob received 0.1 SUI for completing the translation');
+        console.log('- ✅ Alice claimed her own job (self-claiming)');
+        console.log('- ✅ Alice completed the job with cancellation message');
+        console.log('- ✅ Alice verified and released payment to herself');
+        console.log('- ✅ Alice deleted the VERIFIED job and got storage rebate');
+        console.log('- ✅ Successfully implemented job "cancellation" via self-verification');
+        console.log('');
+        console.log('📝 Key Learning: The smart contract allows self-verification as a legitimate');
+        console.log('   cancellation mechanism. This maintains payment integrity while providing');
+        console.log('   flexibility for job submitters to cancel their own work.');
         
     } catch (error) {
         console.error('❌ Test failed:', error.message);
@@ -425,7 +381,7 @@ async function runCase1Test() {
 
 // Run the test
 if (require.main === module) {
-    runCase1Test();
+    runCancelJobTest();
 }
 
-module.exports = { runCase1Test };
+module.exports = { runCancelJobTest };

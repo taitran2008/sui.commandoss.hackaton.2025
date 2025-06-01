@@ -21,8 +21,8 @@ const fs = require('fs');
 const path = require('path');
 
 // Contract constants from deployment
-const PACKAGE_ID = '0xb1ce95fa4ef1871449e1d474ff8c8986143e2f6f928a51a2ddef41833f0d4383';
-const MANAGER_ID = '0x24f08c6063eae6e3803b3e4bd474f902104a8e0878a76bbd20b1e391a6487458';
+const PACKAGE_ID = '0xf6869ff5c7ed0c8f89a0890c502cfe0446240c1dc8babe275532ecff2c4b2b63';
+const MANAGER_ID = '0x178ce7cbd06f907cfd99e8b2dac27b352e032f66dadae77a5aed77df95572e29';
 const CLOCK_ID = '0x6';
 
 // Initialize client
