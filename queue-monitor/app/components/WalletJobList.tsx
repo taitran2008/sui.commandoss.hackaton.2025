@@ -222,35 +222,8 @@ export function WalletJobList({
           </p>
         </div>
         <div className="flex gap-2">
-          <button 
-            onClick={() => {
-              console.log('🔥 Test button clicked')
-              if (jobs.length > 0) {
-                handleJobClick(jobs[0])
-              } else {
-                // Create a dummy job for testing
-                const dummyJob: WalletJob = {
-                  id: 'test-123',
-                  name: 'Test Job',
-                  status: 'Processing',
-                  timestamp: 'Just now'
-                }
-                handleJobClick(dummyJob)
-              }
-            }}
-            className="px-3 py-1 bg-blue-500 text-white rounded text-sm"
-          >
-            Test Modal
-          </button>
-          <button 
-            onClick={() => {
-              console.log('🔥 Simple alert test')
-              alert('This alert works - so JavaScript is working')
-            }}
-            className="px-3 py-1 bg-green-500 text-white rounded text-sm"
-          >
-            Test Alert
-          </button>
+         
+    
         </div>
       </div>
 

@@ -106,7 +106,7 @@ export function JobDetailModal({ job, isOpen, onClose }: JobDetailModalProps) {
             </div>
           </div>
 
-          {/* Worker Info */}
+          {/* Worker Info
           {job.workerAddress && (
             <div className="mb-6">
               <h3 className="text-lg font-medium text-gray-800 mb-3">Worker Information</h3>
@@ -123,9 +123,9 @@ export function JobDetailModal({ job, isOpen, onClose }: JobDetailModalProps) {
                 </div>
               </div>
             </div>
-          )}
+          )} */}
 
-          {/* Timeline */}
+          {/* Timeline
           <div className="mb-6">
             <h3 className="text-lg font-medium text-gray-800 mb-3">Timeline</h3>
             <div className="space-y-2 text-sm">
@@ -140,7 +140,7 @@ export function JobDetailModal({ job, isOpen, onClose }: JobDetailModalProps) {
                 </div>
               )}
             </div>
-          </div>
+          </div> */}
 
           {/* Description */}
           <div className="mb-6">

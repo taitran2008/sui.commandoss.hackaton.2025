@@ -87,15 +87,20 @@ export function WorkerManagement({ onWorkerRegistered }: WorkerManagementProps) 
             
             // Extract subscription ID from the result
             const newSubscriptionId = jobService.parseSubscriptionIdFromResult(result)
+            let finalSubscriptionId: string
+            
             if (newSubscriptionId) {
               setSubscriptionId(newSubscriptionId)
+              finalSubscriptionId = newSubscriptionId
             } else {
               // Fallback for development
-              setSubscriptionId(`worker_subscription_${Date.now()}`)
+              const fallbackId = `worker_subscription_${Date.now()}`
+              setSubscriptionId(fallbackId)
+              finalSubscriptionId = fallbackId
             }
             
             setSuccess('Worker registered successfully! You can now fetch jobs from the selected queues.')
-            onWorkerRegistered?.(newSubscriptionId)
+            onWorkerRegistered?.(finalSubscriptionId)
           },
           onError: (error: any) => {
             console.error('Failed to register worker:', error)

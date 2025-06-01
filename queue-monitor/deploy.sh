@@ -1,0 +1,1 @@
+aws s3 cp out/ s3://golinky.me/test/ --recursive --profile sui

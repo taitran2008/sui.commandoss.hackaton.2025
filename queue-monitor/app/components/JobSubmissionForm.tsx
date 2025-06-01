@@ -211,9 +211,16 @@ export function JobSubmissionForm({ onJobSubmitted }: JobSubmissionFormProps) {
             await new Promise(resolve => setTimeout(resolve, delay))
           }
         }
+        // This should never be reached due to the throw above, but TypeScript needs this
+        throw new Error('Failed to retrieve transaction')
       }
 
       const txDetails = await waitForTransaction(submitResult.digest)
+
+      // Check if transaction details were retrieved
+      if (!txDetails) {
+        throw new Error('Failed to retrieve transaction details')
+      }
 
       // Check if transaction was successful
       const isSuccessful = txDetails.effects?.status?.status === 'success'

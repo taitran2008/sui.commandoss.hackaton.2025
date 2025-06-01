@@ -23,6 +23,21 @@ const CLOCK_ID = '0x6';
 - `2` - COMPLETED (work done, pending verification)
 - `3` - VERIFIED (payment released)
 
+## ⚠️ Important Notes
+
+### Treasury Balance Function Not Available
+The smart contract **does not include a `get_treasury_balance` function**. This means:
+- Treasury balance cannot be queried directly from the contract
+- The contract design focuses on individual job rewards rather than a central treasury
+- If you need treasury functionality, you would need to modify the smart contract
+
+### Available View Functions Only
+The contract only provides these view functions:
+- Job details and status queries
+- Pending jobs management
+- Job availability checks
+- Time remaining calculations
+
 ## Core Functions
 
 ### 1. Submit Job
@@ -180,15 +195,6 @@ const unsubscribe = await client.subscribeEvent({
     },
 });
 ```
-
-## Important Notes
-
-- **Timeout Range**: Job timeout must be between 30 and 2880 minutes (30 minutes to 48 hours)
-- **Reward Amount**: Specified in MIST (1 SUI = 1,000,000,000 MIST)
-- **Transaction Options**: Always include `showEffects: true, showEvents: true` for debugging
-- **Job States**: PENDING → CLAIMED → COMPLETED → VERIFIED (or REJECTED back to PENDING)
-- **Storage Rebate**: Delete completed jobs to reclaim storage costs
-- **Event Monitoring**: Subscribe to package events for real-time job updates
 
 ## Error Codes
 - `2` - Job already claimed
