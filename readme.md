@@ -132,8 +132,6 @@ smart_contracts/       # Sui Move smart contracts
 - **Decentralized**: No central authority controlling job assignments
 - **Transparent**: All job states and transactions visible on blockchain
 - **Flexible Timeouts**: Configurable job expiration (30 minutes to 48 hours)
-- **Gas Efficient**: Optimized for low transaction costs on Sui
-- **Event-Driven**: Real-time updates through blockchain events
 
 ## 🔍 API Documentation
 
