@@ -1,145 +1,100 @@
-/// Module: Job Queue System
-/// 
-/// A decentralized job queue system that stores jobs as on-chain objects
-/// and supports efficient processing by workers through named queues,
-/// prioritization, and error handling mechanisms.
-/// 
-/// ## Payment/Refund Logic:
-/// Users stake SUI tokens when submitting jobs. The payment logic is designed to be fair:
-/// 
-/// **PAYMENT (Stake Kept):**
-/// - Job completed successfully → User pays the staked amount as fee for service
-/// 
-/// **REFUND (Stake Returned):**
-/// - Job fails after max retry attempts → Full refund (service couldn't be provided)
-/// - Job cancelled by user (pending status) → Full refund (service not requested)
-/// - Job expires after 24 hours without processing → Full refund (service not provided)
-/// - Job abandoned by worker (visibility timeout exceeded) → Full refund if max attempts reached
-/// - Admin emergency refund → Full refund (admin intervention)
-/// 
-/// **RETRY (Stake Held):**
-/// - Job fails but has remaining attempts → Stake held for retry, refunded if ultimately fails
-/// - Job abandoned but has remaining attempts → Stake held for retry, refunded if ultimately fails
-/// 
-/// This ensures users only pay when their job is successfully processed.
+/// A decentralized job queue where users can submit jobs, and workers can claim and complete them.
+/// Once completed, the worker gets rewarded in SUI or another token.
 module smart_contracts::job_queue {
     use std::string::{Self, String};
     use sui::coin::{Self, Coin};
     use sui::sui::SUI;
+    use sui::balance::{Self, Balance};
     use sui::clock::{Self, Clock};
     use sui::event;
-    use sui::table::{Self, Table};
-    use sui::balance::{Self, Balance};
 
     // Error codes
-    const E_INVALID_PAYLOAD_SIZE: u64 = 1;
-    const E_INVALID_QUEUE_NAME: u64 = 2;
-    const E_JOB_NOT_FOUND: u64 = 3;
-    const E_INVALID_BATCH_SIZE: u64 = 7;
-    const E_UNAUTHORIZED_ACCESS: u64 = 8;
-    const E_INSUFFICIENT_TREASURY: u64 = 9;
-    const E_UNAUTHORIZED_REFUND: u64 = 10;
+    const E_JOB_ALREADY_CLAIMED: u64 = 2;
+    const E_NOT_JOB_CLAIMER: u64 = 3;
+    const E_JOB_NOT_COMPLETED: u64 = 4;
+    const E_NOT_JOB_SUBMITTER: u64 = 5;
+    const E_EMPTY_DESCRIPTION: u64 = 7;
+    const E_JOB_EXPIRED: u64 = 8;
+    const E_INVALID_TIMEOUT: u64 = 9;
 
-    // Constants
-    const MAX_PAYLOAD_SIZE: u64 = 4096; // 4KB
-    const MAX_QUEUE_NAME_LENGTH: u64 = 255;
-    const MAX_BATCH_SIZE: u64 = 50;
-    const DEFAULT_VISIBILITY_TIMEOUT: u64 = 300; // 5 minutes in seconds
-    const DEFAULT_MAX_ATTEMPTS: u64 = 3;
-
-    // Job status enumeration
+    // Job status - Enhanced with REJECTED status
     const JOB_STATUS_PENDING: u8 = 0;
-    const JOB_STATUS_RESERVED: u8 = 1;
+    const JOB_STATUS_CLAIMED: u8 = 1;
     const JOB_STATUS_COMPLETED: u8 = 2;
-    const JOB_STATUS_DLQ: u8 = 4;
+    const JOB_STATUS_VERIFIED: u8 = 3;
 
-    /// Job object stored on-chain
+    /// Job object that stores job details and reward
     public struct Job has key, store {
         id: UID,
-        uuid: String,
-        queue: String,
-        payload: String,
-        attempts: u16,
-        reserved_at: Option<u64>,
-        available_at: u64,
-        created_at: u64,
-        status: u8,
-        error_message: Option<String>,
+        description: String,
+        reward: Balance<SUI>,
         submitter: address,
-        priority_stake: u64,
+        worker: Option<address>,
+        result: Option<String>,
+        status: u8,
+        created_at: u64,
+        claimed_at: Option<u64>,
+        completed_at: Option<u64>,
+        timeout_minutes: u64,  // Configurable timeout per job in minutes
+        deadline_ms: Option<u64>, // Absolute deadline (now + timeout_minutes) when job is claimed
     }
 
-    /// Job Queue Manager - main contract object
+    /// Job Queue Manager - shared object that manages all jobs
     public struct JobQueueManager has key {
         id: UID,
-        jobs: Table<String, Job>, // uuid -> Job
-        queue_jobs: Table<String, vector<String>>, // queue_name -> job_uuids
         total_jobs: u64,
-        total_workers: u64,
-        visibility_timeout: u64,
-        max_attempts: u64,
-        treasury: Balance<SUI>,
-    }
-
-    /// Worker registration for queue subscription
-    public struct WorkerSubscription has key {
-        id: UID,
-        worker: address,
-        subscribed_queues: vector<String>,
-        batch_size: u64,
-        visibility_timeout: u64,
+        pending_jobs: vector<ID>,
     }
 
     // Events
     public struct JobSubmitted has copy, drop {
-        uuid: String,
-        queue: String,
+        job_id: ID,
+        description: String,
+        reward_amount: u64,
         submitter: address,
-        created_at: u64,
-        priority_stake: u64,
+        timestamp: u64,
     }
 
-    public struct JobReserved has copy, drop {
-        uuid: String,
-        queue: String,
+    public struct JobClaimed has copy, drop {
+        job_id: ID,
         worker: address,
-        reserved_at: u64,
+        timestamp: u64,
     }
 
     public struct JobCompleted has copy, drop {
-        uuid: String,
-        queue: String,
+        job_id: ID,
         worker: address,
-        completed_at: u64,
+        result: String,
+        timestamp: u64,
     }
 
-    public struct JobFailed has copy, drop {
-        uuid: String,
-        queue: String,
+    public struct JobVerified has copy, drop {
+        job_id: ID,
         worker: address,
-        attempts: u16,
-        error_message: String,
-        moved_to_dlq: bool,
+        reward_amount: u64,
+        timestamp: u64,
     }
 
-    public struct StakeRefunded has copy, drop {
-        uuid: String,
-        submitter: address,
-        refund_amount: u64,
+    public struct JobRejected has copy, drop {
+        job_id: ID,
+        worker: address,
         reason: String,
+        timestamp: u64,
+    }
+
+    public struct JobReleased has copy, drop {
+        job_id: ID,
+        worker: address,
+        reason: String,
+        timestamp: u64,
     }
 
     /// Initialize the job queue system
     fun init(ctx: &mut TxContext) {
         let manager = JobQueueManager {
             id: object::new(ctx),
-            jobs: table::new(ctx),
-            queue_jobs: table::new(ctx),
             total_jobs: 0,
-            total_workers: 0,
-            visibility_timeout: DEFAULT_VISIBILITY_TIMEOUT,
-            max_attempts: DEFAULT_MAX_ATTEMPTS,
-            treasury: balance::zero(),
+            pending_jobs: vector::empty(),
         };
         transfer::share_object(manager);
     }
@@ -150,582 +105,356 @@ module smart_contracts::job_queue {
         init(ctx);
     }
 
-    /// Submit a new job to the queue with SUI staking for priority
+    /// Submit a new job with a reward and configurable timeout
+    /// Example: "Translate 100 words into French" with 1 SUI reward and 720 minute (12 hour) timeout
     public entry fun submit_job(
         manager: &mut JobQueueManager,
-        uuid: String,
-        queue: String,
-        payload: String,
-        stake: Coin<SUI>,
+        description: String,
+        reward: Coin<SUI>,
+        timeout_minutes: u64,  // Timeout in minutes (30-2880 = 30min to 48h)
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        // Validate inputs
-        assert!(string::length(&payload) <= MAX_PAYLOAD_SIZE, E_INVALID_PAYLOAD_SIZE);
-        assert!(string::length(&queue) <= MAX_QUEUE_NAME_LENGTH, E_INVALID_QUEUE_NAME);
-        assert!(!string::is_empty(&queue), E_INVALID_QUEUE_NAME);
-
-        let stake_amount = coin::value(&stake);
-        let current_time = clock::timestamp_ms(clock) / 1000; // Convert to seconds
+        assert!(!string::is_empty(&description), E_EMPTY_DESCRIPTION);
+        assert!(timeout_minutes >= 30 && timeout_minutes <= 2880, E_INVALID_TIMEOUT); // 30min to 48h
+        
+        let reward_amount = coin::value(&reward);
+        let current_time = clock::timestamp_ms(clock);
         let submitter = tx_context::sender(ctx);
 
-        // Add stake to treasury
-        balance::join(&mut manager.treasury, coin::into_balance(stake));
-
-        // Store values before creating job to avoid move issues
-        let job_uuid = uuid;
-        let job_queue = queue;
-
-        // Create job
         let job = Job {
             id: object::new(ctx),
-            uuid: job_uuid,
-            queue: job_queue,
-            payload: payload,
-            attempts: 0,
-            reserved_at: option::none(),
-            available_at: current_time,
-            created_at: current_time,
+            description,
+            reward: coin::into_balance(reward),
+            submitter,
+            worker: option::none(),
+            result: option::none(),
             status: JOB_STATUS_PENDING,
-            error_message: option::none(),
-            submitter: submitter,
-            priority_stake: stake_amount,
+            created_at: current_time,
+            claimed_at: option::none(),
+            completed_at: option::none(),
+            timeout_minutes,
+            deadline_ms: option::none(), // Will be set when job is claimed
         };
 
-        // Add job to manager
-        table::add(&mut manager.jobs, job_uuid, job);
+        let job_id = object::id(&job);
         
-        // Add job to queue
-        if (!table::contains(&manager.queue_jobs, job_queue)) {
-            table::add(&mut manager.queue_jobs, job_queue, vector::empty());
-        };
-        let queue_jobs = table::borrow_mut(&mut manager.queue_jobs, job_queue);
-        vector::push_back(queue_jobs, job_uuid);
-
+        // Add job to pending queue
+        vector::push_back(&mut manager.pending_jobs, job_id);
         manager.total_jobs = manager.total_jobs + 1;
 
         // Emit event
         event::emit(JobSubmitted {
-            uuid: job_uuid,
-            queue: job_queue,
-            submitter: submitter,
-            created_at: current_time,
-            priority_stake: stake_amount,
+            job_id,
+            description: job.description,
+            reward_amount,
+            submitter,
+            timestamp: current_time,
+        });
+
+        // Transfer job object to shared storage
+        transfer::share_object(job);
+    }
+
+    /// Worker claims a job from the queue
+    public entry fun claim_job(
+        manager: &mut JobQueueManager,
+        job: &mut Job,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        assert!(job.status == JOB_STATUS_PENDING, E_JOB_ALREADY_CLAIMED);
+        
+        let worker = tx_context::sender(ctx);
+        let current_time = clock::timestamp_ms(clock);
+        let job_id = object::id(job);
+
+        // Calculate deadline: now + timeout_minutes (converted to milliseconds)
+        let deadline = current_time + (job.timeout_minutes * 60_000); // Convert minutes to ms
+
+        // Update job status
+        job.status = JOB_STATUS_CLAIMED;
+        job.worker = option::some(worker);
+        job.claimed_at = option::some(current_time);
+        job.deadline_ms = option::some(deadline);
+
+        // Remove from pending queue
+        let (found, index) = vector::index_of(&manager.pending_jobs, &job_id);
+        if (found) {
+            vector::remove(&mut manager.pending_jobs, index);
+        };
+
+        // Emit event
+        event::emit(JobClaimed {
+            job_id,
+            worker,
+            timestamp: current_time,
         });
     }
 
-    /// Register worker for queue subscription
-    public entry fun register_worker(
-        manager: &mut JobQueueManager,
-        queues: vector<String>,
-        batch_size: u64,
-        visibility_timeout: u64,
-        ctx: &mut TxContext
-    ) {
-        assert!(batch_size > 0 && batch_size <= MAX_BATCH_SIZE, E_INVALID_BATCH_SIZE);
-        
-        let subscription = WorkerSubscription {
-            id: object::new(ctx),
-            worker: tx_context::sender(ctx),
-            subscribed_queues: queues,
-            batch_size: batch_size,
-            visibility_timeout: visibility_timeout,
-        };
-        
-        // Increment worker counter
-        manager.total_workers = manager.total_workers + 1;
-        
-        transfer::transfer(subscription, tx_context::sender(ctx));
-    }
-
-    /// Fetch jobs from subscribed queues (batch processing)
-    public fun fetch_jobs(
-        manager: &mut JobQueueManager,
-        subscription: &WorkerSubscription,
-        queue_name: String,
-        clock: &Clock,
-        ctx: &mut TxContext
-    ): vector<String> {
-        assert!(vector::contains(&subscription.subscribed_queues, &queue_name), E_UNAUTHORIZED_ACCESS);
-        
-        let current_time = clock::timestamp_ms(clock) / 1000;
-        let worker = tx_context::sender(ctx);
-        let mut fetched_jobs = vector::empty<String>();
-        
-        if (!table::contains(&manager.queue_jobs, queue_name)) {
-            return fetched_jobs
-        };
-
-        let queue_jobs = table::borrow_mut(&mut manager.queue_jobs, queue_name);
-        let mut fetched_count = 0;
-        
-        // For now, we'll implement a simple priority system
-        // In a production system, we'd implement a more sophisticated priority queue
-        let mut highest_stake = 0;
-        
-        // First pass: find the highest stake amount
-        let mut i = 0;
-        while (i < vector::length(queue_jobs)) {
-            let job_uuid = *vector::borrow(queue_jobs, i);
-            
-            if (table::contains(&manager.jobs, job_uuid)) {
-                let job = table::borrow(&manager.jobs, job_uuid);
-                
-                if (is_job_available(job, current_time)) {
-                    if (job.priority_stake > highest_stake) {
-                        highest_stake = job.priority_stake;
-                    }
-                }
-            };
-            i = i + 1;
-        };
-        
-        // Second pass: collect jobs with highest stake, sorted by creation time
-        i = 0;
-        while (i < vector::length(queue_jobs) && fetched_count < subscription.batch_size) {
-            let job_uuid = *vector::borrow(queue_jobs, i);
-            
-            if (table::contains(&manager.jobs, job_uuid)) {
-                let job = table::borrow_mut(&mut manager.jobs, job_uuid);
-                
-                // Check if job is available and has highest stake
-                if (is_job_available(job, current_time) && job.priority_stake == highest_stake) {
-                    // Store job info before reservation
-                    let job_uuid_copy = job.uuid;
-                    let job_queue_copy = job.queue;
-                    
-                    // Reserve the job
-                    job.status = JOB_STATUS_RESERVED;
-                    job.reserved_at = option::some(current_time);
-                    
-                    vector::push_back(&mut fetched_jobs, job_uuid);
-                    fetched_count = fetched_count + 1;
-                    
-                    // Emit event
-                    event::emit(JobReserved {
-                        uuid: job_uuid_copy,
-                        queue: job_queue_copy,
-                        worker: worker,
-                        reserved_at: current_time,
-                    });
-                }
-            };
-            i = i + 1;
-        };
-        
-        fetched_jobs
-    }
-
-    /// Mark job as completed - stake is kept as payment for successful processing
+    /// Worker submits the completed job with result
     public entry fun complete_job(
-        manager: &mut JobQueueManager,
-        job_uuid: String,
+        job: &mut Job,
+        result: String,
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
+        assert!(job.status == JOB_STATUS_CLAIMED, E_JOB_NOT_COMPLETED);
         
-        let job = table::borrow_mut(&mut manager.jobs, job_uuid);
-        let current_time = clock::timestamp_ms(clock) / 1000;
         let worker = tx_context::sender(ctx);
+        assert!(option::contains(&job.worker, &worker), E_NOT_JOB_CLAIMER);
         
-        // Verify job is reserved
-        assert!(job.status == JOB_STATUS_RESERVED, E_JOB_NOT_FOUND);
-        
-        // Store values before mutations
-        let job_uuid_copy = job.uuid;
-        let job_queue_copy = job.queue;
-        
-        // Mark as completed
+        let current_time = clock::timestamp_ms(clock);
+        let job_id = object::id(job);
+
+        // Update job with result
         job.status = JOB_STATUS_COMPLETED;
-        
-        // PAYMENT: Stake is kept in treasury as payment for successful job processing
-        // This is the only case where the user's stake is not refunded
-        // The stake serves as payment for the successful completion of the job
-        
-        // Remove from queue (after releasing the mutable borrow)
-        remove_job_from_queue(manager, &job_queue_copy, &job_uuid);
-        
+        job.result = option::some(result);
+        job.completed_at = option::some(current_time);
+
         // Emit event
         event::emit(JobCompleted {
-            uuid: job_uuid_copy,
-            queue: job_queue_copy,
-            worker: worker,
-            completed_at: current_time,
+            job_id,
+            worker,
+            result: *option::borrow(&job.result),
+            timestamp: current_time,
         });
     }
 
-    /// Mark job as failed with error message and refund stake appropriately
-    public entry fun fail_job(
-        manager: &mut JobQueueManager,
-        job_uuid: String,
-        error_message: String,
+    /// Job submitter verifies the work and releases payment to worker
+    public entry fun verify_and_release(
+        job: &mut Job,
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
+        assert!(job.status == JOB_STATUS_COMPLETED, E_JOB_NOT_COMPLETED);
         
-        let job = table::borrow_mut(&mut manager.jobs, job_uuid);
-        let current_time = clock::timestamp_ms(clock) / 1000;
-        let worker = tx_context::sender(ctx);
+        let submitter = tx_context::sender(ctx);
+        assert!(job.submitter == submitter, E_NOT_JOB_SUBMITTER);
         
-        // Verify job is reserved
-        assert!(job.status == JOB_STATUS_RESERVED, E_JOB_NOT_FOUND);
-        
-        // Store values before mutations to avoid borrow checker issues
-        let job_queue_copy = job.queue;
-        let job_uuid_copy = job.uuid;
-        let initial_attempts = job.attempts;
-        let submitter = job.submitter;
-        let stake_amount = job.priority_stake;
-        
-        // Increment attempts
-        job.attempts = job.attempts + 1;
-        job.error_message = option::some(error_message);
-        job.reserved_at = option::none();
-        
-        let mut moved_to_dlq = false;
-        
-        // Check if max attempts exceeded
-        if (job.attempts >= (manager.max_attempts as u16)) {
-            // Move to DLQ and refund the user since job failed permanently
-            job.status = JOB_STATUS_DLQ;
-            moved_to_dlq = true;
-            
-            // REFUND: Job failed permanently after all retry attempts
-            refund_stake(manager, submitter, stake_amount, string::utf8(b"Job moved to DLQ after max attempts"), ctx);
-            
-            // Emit refund event
-            event::emit(StakeRefunded {
-                uuid: job_uuid_copy,
-                submitter: submitter,
-                refund_amount: stake_amount,
-                reason: string::utf8(b"Job moved to DLQ after max attempts"),
-            });
-        } else {
-            // Make available for retry - keep stake for potential retry
-            // NOTE: Stake remains in treasury until job either succeeds or exhausts all attempts
-            job.status = JOB_STATUS_PENDING;
-            job.available_at = current_time;
-        };
-        
-        // Remove from queue if moved to DLQ (after releasing the mutable borrow)
-        if (moved_to_dlq) {
-            remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
-        };
-        
+        let worker = *option::borrow(&job.worker);
+        let reward_amount = balance::value(&job.reward);
+        let current_time = clock::timestamp_ms(clock);
+        let job_id = object::id(job);
+
+        // Transfer reward to worker
+        let reward_balance = balance::withdraw_all(&mut job.reward);
+        let reward_coin = coin::from_balance(reward_balance, ctx);
+        transfer::public_transfer(reward_coin, worker);
+
+        // Update job status
+        job.status = JOB_STATUS_VERIFIED;
+
         // Emit event
-        event::emit(JobFailed {
-            uuid: job_uuid_copy,
-            queue: job_queue_copy,
-            worker: worker,
-            attempts: initial_attempts + 1,
-            error_message: error_message,
-            moved_to_dlq: moved_to_dlq,
+        event::emit(JobVerified {
+            job_id,
+            worker,
+            reward_amount,
+            timestamp: current_time,
         });
     }
 
+    /// Delete a completed and verified job to reclaim storage and get rebate
+    public entry fun delete_job(job: Job, _ctx: &mut TxContext) {
+        assert!(job.status == JOB_STATUS_VERIFIED, E_JOB_NOT_COMPLETED);
+        
+        let Job {
+            id,
+            description: _,
+            reward,
+            submitter: _,
+            worker: _,
+            result: _,
+            status: _,
+            created_at: _,
+            claimed_at: _,
+            completed_at: _,
+            timeout_minutes: _,
+            deadline_ms: _,
+        } = job;
+
+        // Ensure reward is empty before deletion
+        balance::destroy_zero(reward);
+        object::delete(id);
+        
+        // Storage rebate is automatically issued when object is deleted
+    }
+
+    /// Job submitter rejects the work and resets job to pending status
+    public entry fun reject_job(
+        manager: &mut JobQueueManager,
+        job: &mut Job,
+        reason: String,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        assert!(job.status == JOB_STATUS_COMPLETED, E_JOB_NOT_COMPLETED);
+        
+        let submitter = tx_context::sender(ctx);
+        assert!(job.submitter == submitter, E_NOT_JOB_SUBMITTER);
+        
+        let current_time = clock::timestamp_ms(clock);
+        let job_id = object::id(job);
+        let worker = *option::borrow(&job.worker);
+
+        // Reset job to pending status for re-claiming
+        job.status = JOB_STATUS_PENDING;
+        job.worker = option::none();
+        job.result = option::none();
+        job.claimed_at = option::none();
+        job.completed_at = option::none();
+        job.deadline_ms = option::none();
+
+        // Add back to pending queue
+        vector::push_back(&mut manager.pending_jobs, job_id);
+
+        // Emit event
+        event::emit(JobRejected {
+            job_id,
+            worker,
+            reason,
+            timestamp: current_time,
+        });
+    }
+
+    /// Release a job back to the queue if worker exceeded timeout
+    /// Can be called by anyone to clean up expired jobs
+    public entry fun release_expired_job(
+        manager: &mut JobQueueManager,
+        job: &mut Job,
+        clock: &Clock,
+        _ctx: &mut TxContext
+    ) {
+        assert!(job.status == JOB_STATUS_CLAIMED, E_JOB_NOT_COMPLETED);
+        
+        // Use the helper function to check if job has expired
+        assert!(is_job_expired(job, clock), E_JOB_EXPIRED);
+        
+        let job_id = object::id(job);
+        let worker = *option::borrow(&job.worker);
+        let current_time = clock::timestamp_ms(clock);
+
+        // Reset job to pending status for re-claiming
+        job.status = JOB_STATUS_PENDING;
+        job.worker = option::none();
+        job.claimed_at = option::none();
+        job.deadline_ms = option::none();
+
+        // Add back to pending queue
+        vector::push_back(&mut manager.pending_jobs, job_id);
+
+        // Emit event
+        event::emit(JobReleased {
+            job_id,
+            worker,
+            reason: string::utf8(b"Job timeout exceeded"),
+            timestamp: current_time,
+        });
+    }
+
+    // === View Functions ===
+
     /// Get job details
-    public fun get_job(manager: &JobQueueManager, job_uuid: String): &Job {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
-        table::borrow(&manager.jobs, job_uuid)
+    public fun get_job_details(job: &Job): (String, u64, address, Option<address>, Option<String>, u8) {
+        (
+            job.description,
+            balance::value(&job.reward),
+            job.submitter,
+            job.worker,
+            job.result,
+            job.status
+        )
     }
 
-    /// Get queue statistics
-    public fun get_queue_stats(manager: &JobQueueManager, queue_name: String): (u64, u64) {
-        if (!table::contains(&manager.queue_jobs, queue_name)) {
-            return (0, 0)
-        };
-        
-        let queue_jobs = table::borrow(&manager.queue_jobs, queue_name);
-        let total_jobs = vector::length(queue_jobs);
-        let mut pending_jobs = 0;
-        
-        let mut i = 0;
-        while (i < total_jobs) {
-            let job_uuid = *vector::borrow(queue_jobs, i);
-            if (table::contains(&manager.jobs, job_uuid)) {
-                let job = table::borrow(&manager.jobs, job_uuid);
-                if (job.status == JOB_STATUS_PENDING) {
-                    pending_jobs = pending_jobs + 1;
-                }
-            };
-            i = i + 1;
-        };
-        
-        (total_jobs, pending_jobs)
+    /// Get job timestamps
+    public fun get_job_timestamps(job: &Job): (u64, Option<u64>, Option<u64>) {
+        (job.created_at, job.claimed_at, job.completed_at)
     }
 
-    /// Get total number of worker subscriptions
-    public fun get_total_worker_subscriptions(manager: &JobQueueManager): u64 {
-        manager.total_workers
+    /// Get number of pending jobs
+    public fun get_pending_jobs_count(manager: &JobQueueManager): u64 {
+        vector::length(&manager.pending_jobs)
     }
 
-    /// Get total treasury balance amount
-    public fun get_treasury_balance(manager: &JobQueueManager): u64 {
-        balance::value(&manager.treasury)
+    /// Get total jobs count
+    public fun get_total_jobs_count(manager: &JobQueueManager): u64 {
+        manager.total_jobs
     }
 
-    // Helper functions
-    fun is_job_available(job: &Job, current_time: u64): bool {
-        if (job.status != JOB_STATUS_PENDING) {
+    /// Get list of pending job IDs
+    public fun get_pending_job_ids(manager: &JobQueueManager): vector<ID> {
+        manager.pending_jobs
+    }
+
+    /// Check if job is available for claiming
+    public fun is_job_available(job: &Job): bool {
+        job.status == JOB_STATUS_PENDING
+    }
+
+    /// Check if job is completed and ready for verification
+    public fun is_job_ready_for_verification(job: &Job): bool {
+        job.status == JOB_STATUS_COMPLETED
+    }
+
+    /// Get job timeout in milliseconds
+    public fun get_job_timeout_ms(job: &Job): u64 {
+        job.timeout_minutes * 60_000 // Convert minutes to milliseconds
+    }
+
+    /// Check if a claimed job has expired based on timeout
+    public fun is_job_expired(job: &Job, clock: &Clock): bool {
+        if (job.status != JOB_STATUS_CLAIMED) {
             return false
         };
         
-        // Check if job is available based on available_at timestamp
-        if (job.available_at > current_time) {
+        if (option::is_none(&job.deadline_ms)) {
             return false
         };
         
-        // Check visibility timeout for reserved jobs
-        if (option::is_some(&job.reserved_at)) {
-            let reserved_time = *option::borrow(&job.reserved_at);
-            if (current_time - reserved_time < DEFAULT_VISIBILITY_TIMEOUT) {
-                return false
-            }
-        };
+        let current_time = clock::timestamp_ms(clock);
+        let deadline = *option::borrow(&job.deadline_ms);
         
-        true
+        current_time > deadline
     }
 
-    fun remove_job_from_queue(manager: &mut JobQueueManager, queue_name: &String, job_uuid: &String) {
-        if (!table::contains(&manager.queue_jobs, *queue_name)) {
-            return
-        };
-        
-        let queue_jobs = table::borrow_mut(&mut manager.queue_jobs, *queue_name);
-        let mut i = 0;
-        while (i < vector::length(queue_jobs)) {
-            if (vector::borrow(queue_jobs, i) == job_uuid) {
-                vector::remove(queue_jobs, i);
-                break
-            };
-            i = i + 1;
+    /// Get job status as a readable string (for debugging/display purposes)
+    public fun get_job_status_string(job: &Job): String {
+        if (job.status == JOB_STATUS_PENDING) {
+            string::utf8(b"PENDING")
+        } else if (job.status == JOB_STATUS_CLAIMED) {
+            string::utf8(b"CLAIMED")
+        } else if (job.status == JOB_STATUS_COMPLETED) {
+            string::utf8(b"COMPLETED")
+        } else if (job.status == JOB_STATUS_VERIFIED) {
+            string::utf8(b"VERIFIED")
+        } else {
+            string::utf8(b"UNKNOWN")
         }
     }
 
-    fun refund_stake(
-        manager: &mut JobQueueManager,
-        recipient: address,
-        amount: u64,
-        _reason: String,
-        ctx: &mut TxContext
-    ) {
-        // Check if treasury has sufficient balance
-        assert!(balance::value(&manager.treasury) >= amount, E_INSUFFICIENT_TREASURY);
-        
-        // Extract coins from treasury and transfer to recipient
-        let refund_balance = balance::split(&mut manager.treasury, amount);
-        let refund_coin = coin::from_balance(refund_balance, ctx);
-        transfer::public_transfer(refund_coin, recipient);
+    /// Get job deadline in milliseconds (when it was claimed + timeout)
+    public fun get_job_deadline_ms(job: &Job): Option<u64> {
+        job.deadline_ms
     }
 
-    /// Admin function to refund a specific job (emergency refund)
-    public entry fun admin_refund_job(
-        manager: &mut JobQueueManager,
-        job_uuid: String,
-        reason: String,
-        _ctx: &mut TxContext
-    ) {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
-        
-        let job = table::borrow(&manager.jobs, job_uuid);
-        let submitter = job.submitter;
-        let stake_amount = job.priority_stake;
-        let job_uuid_copy = job.uuid;
-        
-        // Only allow refund if job is not completed (completed jobs should keep payment)
-        assert!(job.status != JOB_STATUS_COMPLETED, E_UNAUTHORIZED_REFUND);
-        
-        // Refund the stake
-        refund_stake(manager, submitter, stake_amount, reason, _ctx);
-        
-        // Emit refund event
-        event::emit(StakeRefunded {
-            uuid: job_uuid_copy,
-            submitter: submitter,
-            refund_amount: stake_amount,
-            reason: reason,
-        });
+    /// Get job timeout in minutes
+    public fun get_job_timeout_minutes(job: &Job): u64 {
+        job.timeout_minutes
     }
 
-    /// User function to cancel pending job and get refund
-    public entry fun cancel_job(
-        manager: &mut JobQueueManager,
-        job_uuid: String,
-        ctx: &mut TxContext
-    ) {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
-        
-        let job = table::borrow_mut(&mut manager.jobs, job_uuid);
-        let submitter = tx_context::sender(ctx);
-        
-        // Only submitter can cancel their own job
-        assert!(job.submitter == submitter, E_UNAUTHORIZED_ACCESS);
-        
-        // Only allow cancellation of pending jobs
-        assert!(job.status == JOB_STATUS_PENDING, E_UNAUTHORIZED_REFUND);
-        
-        // Store values before mutations
-        let job_queue_copy = job.queue;
-        let job_uuid_copy = job.uuid;
-        let stake_amount = job.priority_stake;
-        
-        // Mark job as cancelled (we can reuse DLQ status or add a new status)
-        job.status = JOB_STATUS_DLQ;
-        
-        // Remove from queue
-        remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
-        
-        // Refund the stake
-        refund_stake(manager, submitter, stake_amount, string::utf8(b"Job cancelled by user"), ctx);
-        
-        // Emit refund event
-        event::emit(StakeRefunded {
-            uuid: job_uuid_copy,
-            submitter: submitter,
-            refund_amount: stake_amount,
-            reason: string::utf8(b"Job cancelled by user"),
-        });
-    }
-
-    /// Auto-refund for jobs that have been pending too long (timeout mechanism)
-    public entry fun refund_expired_job(
-        manager: &mut JobQueueManager,
-        job_uuid: String,
-        clock: &Clock,
-        ctx: &mut TxContext
-    ) {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
-        
-        let job = table::borrow_mut(&mut manager.jobs, job_uuid);
-        let current_time = clock::timestamp_ms(clock) / 1000;
-        let expiry_time = 24 * 60 * 60; // 24 hours in seconds
-        
-        // Check if job has been pending for too long (24 hours)
-        assert!(job.status == JOB_STATUS_PENDING, E_UNAUTHORIZED_REFUND);
-        assert!(current_time - job.created_at > expiry_time, E_UNAUTHORIZED_REFUND);
-        
-        // Store values before mutations
-        let job_queue_copy = job.queue;
-        let job_uuid_copy = job.uuid;
-        let submitter = job.submitter;
-        let stake_amount = job.priority_stake;
-        
-        // Mark job as expired
-        job.status = JOB_STATUS_DLQ;
-        
-        // Remove from queue
-        remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
-        
-        // Refund the stake
-        refund_stake(manager, submitter, stake_amount, string::utf8(b"Job expired after 24 hours"), ctx);
-        
-        // Emit refund event
-        event::emit(StakeRefunded {
-            uuid: job_uuid_copy,
-            submitter: submitter,
-            refund_amount: stake_amount,
-            reason: string::utf8(b"Job expired after 24 hours"),
-        });
-    }
-
-    /// Release reserved jobs that exceeded visibility timeout and refund if appropriate
-    public entry fun release_abandoned_job(
-        manager: &mut JobQueueManager,
-        job_uuid: String,
-        clock: &Clock,
-        _ctx: &mut TxContext
-    ) {
-        assert!(table::contains(&manager.jobs, job_uuid), E_JOB_NOT_FOUND);
-        
-        let current_time = clock::timestamp_ms(clock) / 1000;
-        
-        // Store values before borrowing to avoid borrow checker issues
-        let (job_queue_copy, job_uuid_copy, submitter, stake_amount, current_attempts, should_refund) = {
-            let job = table::borrow_mut(&mut manager.jobs, job_uuid);
-            
-            // Check if job is reserved and visibility timeout exceeded
-            assert!(job.status == JOB_STATUS_RESERVED, E_UNAUTHORIZED_REFUND);
-            assert!(option::is_some(&job.reserved_at), E_UNAUTHORIZED_REFUND);
-            
-            let reserved_time = *option::borrow(&job.reserved_at);
-            let timeout_exceeded = current_time - reserved_time > manager.visibility_timeout;
-            assert!(timeout_exceeded, E_UNAUTHORIZED_REFUND);
-            
-            // Store values before mutations
-            let job_queue_copy = job.queue;
-            let job_uuid_copy = job.uuid;
-            let submitter = job.submitter;
-            let stake_amount = job.priority_stake;
-            let current_attempts = job.attempts;
-            
-            // Clear reservation and make available for retry
-            job.reserved_at = option::none();
-            
-            // Check if this would exceed max attempts (including the abandoned attempt)
-            let will_exceed_max_attempts = current_attempts + 1 >= (manager.max_attempts as u16);
-            
-            if (will_exceed_max_attempts) {
-                // Move to DLQ since job failed after max attempts (including abandoned)
-                job.status = JOB_STATUS_DLQ;
-                job.attempts = current_attempts + 1; // Count abandoned attempt
-            } else {
-                // Make available for retry
-                job.status = JOB_STATUS_PENDING;
-                job.available_at = current_time;
-                job.attempts = current_attempts + 1; // Count abandoned attempt
-            };
-            
-            (job_queue_copy, job_uuid_copy, submitter, stake_amount, current_attempts, will_exceed_max_attempts)
+    /// Get remaining time in minutes for a claimed job
+    public fun get_remaining_time_minutes(job: &Job, clock: &Clock): u64 {
+        if (job.status != JOB_STATUS_CLAIMED || option::is_none(&job.deadline_ms)) {
+            return 0
         };
         
-        // Now handle refund and queue removal without borrowing job
-        if (should_refund) {
-            // REFUND: Job abandoned and no more attempts allowed
-            refund_stake(manager, submitter, stake_amount, string::utf8(b"Job abandoned after visibility timeout and max attempts reached"), _ctx);
-            
-            // Emit refund event
-            event::emit(StakeRefunded {
-                uuid: job_uuid_copy,
-                submitter: submitter,
-                refund_amount: stake_amount,
-                reason: string::utf8(b"Job abandoned after visibility timeout and max attempts reached"),
-            });
-            
-            // Remove from queue
-            remove_job_from_queue(manager, &job_queue_copy, &job_uuid_copy);
-        };
+        let current_time = clock::timestamp_ms(clock);
+        let deadline = *option::borrow(&job.deadline_ms);
         
-        // Emit job failed event for the abandoned attempt
-        event::emit(JobFailed {
-            uuid: job_uuid_copy,
-            queue: job_queue_copy,
-            worker: @0x0, // No specific worker since it was abandoned
-            attempts: current_attempts + 1,
-            error_message: string::utf8(b"Job abandoned - visibility timeout exceeded"),
-            moved_to_dlq: should_refund,
-        });
-    }
-
-    // Admin functions
-    public entry fun update_visibility_timeout(
-        manager: &mut JobQueueManager,
-        new_timeout: u64,
-        _ctx: &mut TxContext
-    ) {
-        // Only allow admin to update (in a real implementation, you'd check admin rights)
-        manager.visibility_timeout = new_timeout;
-    }
-
-    public entry fun update_max_attempts(
-        manager: &mut JobQueueManager,
-        new_max_attempts: u64,
-        _ctx: &mut TxContext
-    ) {
-        // Only allow admin to update (in a real implementation, you'd check admin rights)
-        manager.max_attempts = new_max_attempts;
+        if (current_time >= deadline) {
+            0
+        } else {
+            (deadline - current_time) / 60_000 // Convert ms to minutes
+        }
     }
 }
-
-

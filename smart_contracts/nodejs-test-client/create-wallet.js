@@ -9,13 +9,24 @@ class WalletGenerator {
         // Generate new keypair (random)
         const keypair = new Ed25519Keypair();
         
-        // Get public address and private key
+        // Get public address
         const publicAddress = keypair.getPublicKey().toSuiAddress();
-        const privateKey = keypair.getSecretKey();
-        const privateKeyBase64 = Buffer.from(privateKey).toString('base64');
+        
+        // Get the Sui private key string (70 bytes)
+        const suiPrivateKeyString = keypair.getSecretKey();
+        
+        // Extract the raw 32-byte secret key from the Sui private key string
+        // Sui private key format: suiprivkey1q... (base58 encoded)
+        // We need to decode it to get the raw 32-byte secret key
+        const { decodeSuiPrivateKey } = require('@mysten/sui/cryptography');
+        const { secretKey: raw32ByteKey } = decodeSuiPrivateKey(suiPrivateKeyString);
+        
+        // Convert raw 32-byte secret key to base64 for storage
+        const privateKeyBase64 = Buffer.from(raw32ByteKey).toString('base64');
         
         console.log('🏠 Public Address:', publicAddress);
-        console.log('🔐 Private Key (Base64):', privateKeyBase64);
+        console.log('🔐 Private Key (32-byte Base64):', privateKeyBase64);
+        console.log('📏 Key length:', raw32ByteKey.length, 'bytes');
         
         return {
             publicAddress,
@@ -59,16 +70,41 @@ class WalletGenerator {
                 throw new Error(`Wallet file not found: ${publicAddress}`);
             }
             
-            // Read the secret key from file
-            const privateKey = fs.readFileSync(filepath, 'utf8').trim();
+            // Read the content from file
+            const fileContent = fs.readFileSync(filepath, 'utf8').trim();
             console.log('📖 Loaded wallet:', publicAddress);
             
-            // Recreate keypair from private key
-            const privateKeyBytes = Buffer.from(privateKey, 'base64');
-            const keypair = Ed25519Keypair.fromSecretKey(privateKeyBytes);
+            let keypair;
+            let privateKey = fileContent;
+            
+            // Decode base64 content first
+            const decodedData = Buffer.from(fileContent, 'base64');
+            
+            if (decodedData.length === 32) {
+                // New format: Raw 32-byte secret key stored as base64
+                console.log('🔑 Detected 32-byte secret key format');
+                keypair = Ed25519Keypair.fromSecretKey(decodedData);
+            } else {
+                // Old format: Sui private key string stored as base64
+                const decodedString = decodedData.toString('utf8');
+                if (decodedString.startsWith('suiprivkey1')) {
+                    console.log('🔑 Detected Sui private key string format');
+                    keypair = Ed25519Keypair.fromSecretKey(decodedString);
+                    privateKey = decodedString;
+                } else {
+                    throw new Error(`Unknown private key format. Decoded length: ${decodedData.length} bytes`);
+                }
+            }
+            
+            // Verify the address matches
+            const derivedAddress = keypair.getPublicKey().toSuiAddress();
+            if (derivedAddress !== publicAddress) {
+                console.log(`⚠️ Address mismatch: expected ${publicAddress}, got ${derivedAddress}`);
+                console.log('🔧 Using derived address for consistency');
+            }
             
             return {
-                publicAddress,
+                publicAddress: derivedAddress, // Use the derived address to ensure consistency
                 privateKey,
                 keypair
             };
