@@ -150,36 +150,7 @@ expiredTxb.moveCall({
 });
 ```
 
-## Events
 
-Listen to these events for real-time updates:
-
-```javascript
-// Subscribe to job events
-const unsubscribe = await client.subscribeEvent({
-    filter: { Package: PACKAGE_ID },
-    onMessage: (event) => {
-        const eventType = event.type.split('::').pop();
-        switch (eventType) {
-            case 'JobSubmitted':
-                // { job_id, description, reward_amount, submitter, timestamp }
-                break;
-            case 'JobClaimed':
-                // { job_id, worker, timestamp }
-                break;
-            case 'JobCompleted':
-                // { job_id, worker, result, timestamp }
-                break;
-            case 'JobVerified':
-                // { job_id, worker, reward_amount, timestamp }
-                break;
-            case 'JobRejected':
-                // { job_id, worker, reason, timestamp }
-                break;
-        }
-    },
-});
-```
 
 ## Important Notes
 
