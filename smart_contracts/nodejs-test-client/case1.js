@@ -111,10 +111,9 @@ async function runCase1Test() {
             target: `${PACKAGE_ID}::job_queue::submit_job`,
             arguments: [
                 submitTxb.object(MANAGER_ID),
-                submitTxb.pure.string(jobUuid),
-                submitTxb.pure.string("translation"),
-                submitTxb.pure.string(jobPayload),
-                coin,
+                submitTxb.pure.string(jobPayload), // description parameter
+                coin, // reward parameter
+                submitTxb.pure.u64(30), // timeout_minutes parameter (30 minutes)
                 submitTxb.object(CLOCK_ID),
             ],
         });
@@ -134,12 +133,45 @@ async function runCase1Test() {
         
         console.log(`✅ Job submitted successfully! Job UUID: ${jobUuid}`);
         
+        // Extract the job object ID from the created objects
+        let jobId = null;
+        if (submitResult.effects && submitResult.effects.created) {
+            const createdObjects = submitResult.effects.created;
+            // Find the job object (exclude the manager and other system objects)
+            const jobObject = createdObjects.find(obj => 
+                obj.owner && typeof obj.owner === 'object' && obj.owner.Shared
+            );
+            if (jobObject) {
+                jobId = jobObject.reference.objectId;
+                console.log(`🆔 Job Object ID: ${jobId}`);
+            }
+        }
+        
+        if (!jobId) {
+            throw new Error('Could not find job object ID in transaction results');
+        }
+        
         // Check for JobSubmitted event
         const submitEvent = submitResult.events?.find(e => e.type.includes('JobSubmitted'));
         if (submitEvent) {
             console.log(`📢 JobSubmitted event: ${JSON.stringify(submitEvent.parsedJson, null, 2)}`);
         }
         console.log('');
+        
+        // Wait a moment for the object to be finalized on-chain
+        console.log('⏳ Waiting for object to be finalized...');
+        await sleep(3);
+        
+        // Verify the job object exists before claiming
+        try {
+            const jobObject = await client.getObject({
+                id: jobId,
+                options: { showContent: true }
+            });
+            console.log(`🔍 Job object status: ${jobObject.data ? 'exists' : 'not found'}`);
+        } catch (error) {
+            console.log(`⚠️ Warning: Could not verify job object: ${error.message}`);
+        }
         
         // Step 2: Bob claims the job
         console.log('🎯 Step 2: Bob claims the job...');
@@ -215,6 +247,24 @@ async function runCase1Test() {
         }
         console.log('');
         
+        // DEBUG: Check job object state after completion
+        console.log('🔍 DEBUG: Checking job object state after completion...');
+        try {
+            const jobObjectAfterComplete = await client.getObject({
+                id: jobId,
+                options: { showContent: true }
+            });
+            if (jobObjectAfterComplete.data && jobObjectAfterComplete.data.content) {
+                const jobFields = jobObjectAfterComplete.data.content.fields;
+                console.log(`🔍 Job status after completion: ${jobFields.status}`);
+                console.log(`🔍 Job result: ${jobFields.result ? jobFields.result : 'None'}`);
+                console.log(`🔍 Job worker: ${jobFields.worker ? jobFields.worker : 'None'}`);
+            }
+        } catch (error) {
+            console.log(`⚠️ Could not inspect job object: ${error.message}`);
+        }
+        console.log('');
+        
         // Step 5: Alice checks the result and verifies
         console.log('🔍 Step 5: Alice reviews the work result...');
         
@@ -225,8 +275,8 @@ async function runCase1Test() {
             arguments: [jobDetailsTxb.object(jobId)],
         });
         
-        const jobDetailsResult = await client.devInspectTransaction({
-            transaction: jobDetailsTxb,
+        const jobDetailsResult = await client.devInspectTransactionBlock({
+            transactionBlock: jobDetailsTxb,
             sender: alice.address,
         });
         
@@ -239,11 +289,39 @@ async function runCase1Test() {
                     // Skip the first byte (vector length) and convert rest to string
                     const resultStr = Buffer.from(resultBytes.slice(1)).toString('utf8');
                     console.log(`📄 Work Result: "${resultStr}"`);
+                } else {
+                    console.log('📄 Work Result: (empty or not available)');
                 }
+            } else {
+                console.log('📄 Work Result: (unable to parse return values)');
             }
+        } else {
+            console.log('📄 Work Result: (transaction inspection failed)');
         }
         
         console.log('✅ Alice is satisfied with the work and will release payment...');
+        console.log('');
+        
+        // Wait a moment to ensure completion is finalized
+        console.log('⏳ Waiting for completion to be finalized...');
+        await sleep(3);
+        
+        // DEBUG: Final check of job status before verification
+        console.log('🔍 DEBUG: Final check of job status before verification...');
+        try {
+            const jobObjectBeforeVerify = await client.getObject({
+                id: jobId,
+                options: { showContent: true }
+            });
+            if (jobObjectBeforeVerify.data && jobObjectBeforeVerify.data.content) {
+                const jobFields = jobObjectBeforeVerify.data.content.fields;
+                console.log(`🔍 Job status before verification: ${jobFields.status}`);
+                console.log(`🔍 Expected status for COMPLETED: 2`);
+                console.log(`🔍 Job result: ${jobFields.result ? JSON.stringify(jobFields.result) : 'None'}`);
+            }
+        } catch (error) {
+            console.log(`⚠️ Could not inspect job object before verification: ${error.message}`);
+        }
         console.log('');
         
         // Step 6: Alice verifies and releases payment
@@ -276,6 +354,24 @@ async function runCase1Test() {
         const verifyEvent = verifyResult.events?.find(e => e.type.includes('JobVerified'));
         if (verifyEvent) {
             console.log(`📢 JobVerified event: ${JSON.stringify(verifyEvent.parsedJson, null, 2)}`);
+        }
+        console.log('');
+        
+        // DEBUG: Check job object state after verification
+        console.log('🔍 DEBUG: Checking job object state after verification...');
+        await sleep(3);
+        try {
+            const jobObjectAfterVerify = await client.getObject({
+                id: jobId,
+                options: { showContent: true }
+            });
+            if (jobObjectAfterVerify.data && jobObjectAfterVerify.data.content) {
+                const jobFields = jobObjectAfterVerify.data.content.fields;
+                console.log(`🔍 Job status after verification: ${jobFields.status}`);
+                console.log(`🔍 Expected status for VERIFIED: 3`);
+            }
+        } catch (error) {
+            console.log(`⚠️ Could not inspect job object after verification: ${error.message}`);
         }
         console.log('');
         
