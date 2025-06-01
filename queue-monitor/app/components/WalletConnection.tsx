@@ -6,17 +6,22 @@ import {
   useSuiClient,
   useDisconnectWallet 
 } from '@mysten/dapp-kit'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
-export function WalletConnection() {
+interface WalletConnectionProps {
+  onWalletChange?: (walletAddress: string | null) => void
+}
+
+export function WalletConnection({ onWalletChange }: WalletConnectionProps) {
   const account = useCurrentAccount()
   const suiClient = useSuiClient()
   const { mutate: disconnect } = useDisconnectWallet()
   const [balance, setBalance] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const previousAddressRef = useRef<string | null>(null)
 
-  const fetchBalance = async () => {
+  const fetchBalance = useCallback(async () => {
     if (!account?.address) {
       setBalance(null)
       return
@@ -43,13 +48,24 @@ export function WalletConnection() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [account?.address, suiClient])
 
   // Fetch balance when account changes
   useEffect(() => {
-    console.log('Account changed:', account?.address)
+    const currentAddress = account?.address || null
+    console.log('Account changed:', currentAddress)
+    
     fetchBalance()
-  }, [account?.address])
+    
+    // Notify parent component about wallet change
+    if (currentAddress !== previousAddressRef.current) {
+      previousAddressRef.current = currentAddress
+      
+      if (onWalletChange) {
+        onWalletChange(currentAddress)
+      }
+    }
+  }, [account?.address, onWalletChange, fetchBalance])
 
   // Set up auto-refresh every 15 seconds
   useEffect(() => {
@@ -61,7 +77,7 @@ export function WalletConnection() {
     }, 15000) // 15 seconds
 
     return () => clearInterval(interval)
-  }, [account?.address])
+  }, [account?.address, fetchBalance])
 
   // Debug logging
   useEffect(() => {

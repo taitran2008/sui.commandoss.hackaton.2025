@@ -1,7 +1,8 @@
 // Smart Contract Constants for SUI Testnet
+// Updated to match alice_jobs.js constants
 export const CONTRACT_CONFIG = {
-  PACKAGE_ID: '0x4bb63db22d3178013ba93be9d527a72e5511b7a90f031ea9a5f655533e5ecf6d',
-  MANAGER_OBJECT_ID: '0x7d7435df26bc477790d1c50fb679408c9ee61282369507ff3295626bb06037bc',
+  PACKAGE_ID: '0xb1ce95fa4ef1871449e1d474ff8c8986143e2f6f928a51a2ddef41833f0d4383',
+  MANAGER_OBJECT_ID: '0x24f08c6063eae6e3803b3e4bd474f902104a8e0878a76bbd20b1e391a6487458',
   CLOCK_OBJECT_ID: '0x6',
   MODULE_NAME: 'job_queue'
 } as const
