@@ -183,7 +183,7 @@ export class SuiJobService {
       
       // Try to parse as JSON first
       const parsed = JSON.parse(cleanedDescription);
-      
+      console.log('Parsed job payload:', parsed);
       // Check if this is a valid JSON structure with expected fields
       if (typeof parsed === 'object' && parsed !== null) {
         // Handle both old format (with uuid) and new format
@@ -195,6 +195,15 @@ export class SuiJobService {
           return {
             task: taskName,
             fullDescription: parsed.description || description,
+            category: category
+          };
+        }
+        
+        // Handle new JSON schema format with separate description field
+        if (parsed.description && typeof parsed.description === 'string') {
+          return {
+            task: taskName,
+            fullDescription: parsed.description,
             category: category
           };
         }
@@ -395,8 +404,13 @@ export class SuiJobService {
     const parsedPayload = this.parseJobPayload(details?.description || event.parsedJson.description || '');
     // Try to parse the description as JSON to extract additional metadata
     let jsonMetadata: {
+      task?: string;
+      description?: string;
       urgency?: string;
       estimated_duration?: string;
+      reward_amount?: string;
+      timestamp?: string;
+      category?: string;
       [key: string]: string | number | boolean | null | undefined;
     } | null = null;
     try {
@@ -481,9 +495,9 @@ export class SuiJobService {
 
     return {
       uuid: event.parsedJson.job_id,
-      task: parsedPayload.task,
-      description: parsedPayload.fullDescription,
-      category: parsedPayload.category,
+      task: jsonMetadata?.task || parsedPayload.task,
+      description: jsonMetadata?.description || parsedPayload.fullDescription,
+      category: jsonMetadata?.category || parsedPayload.category,
       urgency,
       submitter: event.parsedJson.submitter,
       timestamp: displayTimestamp,
