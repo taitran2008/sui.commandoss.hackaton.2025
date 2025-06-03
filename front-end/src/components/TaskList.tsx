@@ -1,50 +1,36 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Task } from '@/types/task';
+import { useState } from 'react';
 import TaskCard from '@/components/TaskCard';
 import TaskForm from '@/components/TaskForm';
-import { fetchTasks } from '@/lib/api';
 import { sortTasks, filterTasks, getTaskStats } from '@/utils/taskUtils';
 import WalletConnection from '@/components/WalletConnection';
 import WalletBalance from '@/components/WalletBalance';
 import WalletStatus from '@/components/WalletStatus';
 import WalletErrorBoundary from '@/components/WalletErrorBoundary';
 import TransactionHistory from '@/components/TransactionHistory';
+import { useSuiJobs } from '@/hooks/useSuiJobs';
 
 export default function TaskList() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [sortBy, setSortBy] = useState<'timestamp' | 'urgency' | 'reward'>('timestamp');
+  
+  // Use SUI jobs hook instead of local state and API calls
+  const { tasks, loading, error, refetch, isConnected } = useSuiJobs();
 
-  useEffect(() => {
-    loadTasks();
-  }, []);
-
-  const loadTasks = async () => {
-    try {
-      const fetchedTasks = await fetchTasks();
-      setTasks(fetchedTasks);
-    } catch (error) {
-      console.error('Error loading tasks:', error);
-    } finally {
-      setLoading(false);
-    }
+  const handleTaskCreated = () => {
+    // When a task is created, refresh the jobs from blockchain
+    refetch();
   };
 
-  const handleTaskCreated = (newTask: Task) => {
-    setTasks(prev => [newTask, ...prev]);
+  const handleTaskUpdated = () => {
+    // When a task is updated, refresh the jobs from blockchain
+    refetch();
   };
 
-  const handleTaskUpdated = (updatedTask: Task) => {
-    setTasks(prev => prev.map(task => 
-      task.uuid === updatedTask.uuid ? updatedTask : task
-    ));
-  };
-
-  const handleTaskDeleted = (uuid: string) => {
-    setTasks(prev => prev.filter(task => task.uuid !== uuid));
+  const handleTaskDeleted = () => {
+    // When a task is deleted, refresh the jobs from blockchain
+    refetch();
   };
 
   const filteredTasks = filterTasks(tasks, filter);
@@ -52,10 +38,49 @@ export default function TaskList() {
 
   const stats = getTaskStats(tasks);
 
+  // Show wallet connection prompt if not connected
+  if (!isConnected) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center p-8 bg-white rounded-lg shadow-md">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">
+            Connect Your Wallet
+          </h1>
+          <p className="text-gray-600 mb-6">
+            Please connect your SUI wallet to view and manage your jobs.
+          </p>
+          <WalletErrorBoundary>
+            <WalletConnection />
+          </WalletErrorBoundary>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-xl text-gray-600">Loading tasks...</div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="text-xl text-gray-600">Loading your jobs from SUI blockchain...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center p-8 bg-white rounded-lg shadow-md">
+          <div className="text-red-600 text-xl mb-4">⚠️ Error Loading Jobs</div>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button
+            onClick={refetch}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
       </div>
     );
   }
@@ -65,12 +90,28 @@ export default function TaskList() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">Task Management System</h1>
-            <p className="text-gray-600">Manage your SUI blockchain tasks efficiently</p>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              SUI Job Management System
+            </h1>
+            <p className="text-gray-600">
+              Manage your SUI blockchain jobs efficiently • Connected to SUI Testnet
+            </p>
           </div>
-          <WalletErrorBoundary>
-            <WalletBalance />
-          </WalletErrorBoundary>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={refetch}
+              disabled={loading}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh Jobs
+            </button>
+            <WalletErrorBoundary>
+              <WalletBalance />
+            </WalletErrorBoundary>
+          </div>
         </div>
 
         {/* Wallet Connection Section */}
@@ -102,6 +143,7 @@ export default function TaskList() {
             <p className="text-3xl font-bold text-purple-600">{stats.totalReward.toFixed(2)} SUI</p>
           </div>
         </div>
+
 
         <TaskForm onTaskCreated={handleTaskCreated} />
 
@@ -159,13 +201,19 @@ export default function TaskList() {
           <div className="lg:col-span-3 space-y-6">
             {sortedTasks.length === 0 ? (
               <div className="bg-white rounded-lg shadow-md p-12 text-center">
-                <div className="text-gray-400 text-lg mb-2">No tasks found</div>
+                <div className="text-gray-400 text-lg mb-2">No jobs found</div>
                 <p className="text-gray-500">
                   {filter === 'all' 
-                    ? 'Create your first task using the form above.' 
-                    : `No ${filter} tasks available.`
+                    ? 'No jobs found for your wallet address. Create your first job using the form above or check if you\'re connected to the correct wallet.' 
+                    : `No ${filter} jobs available for your wallet.`
                   }
                 </p>
+                <button
+                  onClick={refetch}
+                  className="mt-4 text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  Refresh from blockchain
+                </button>
               </div>
             ) : (
               sortedTasks.map(task => (

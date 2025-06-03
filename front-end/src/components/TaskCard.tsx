@@ -1,8 +1,8 @@
 'use client';
 
 import { Task } from '@/types/task';
-import { updateTaskStatus, deleteTask } from '@/lib/api';
 import { useState } from 'react';
+import { suiJobService } from '@/lib/suiJobService';
 import AddressDisplay from './AddressDisplay';
 
 interface TaskCardProps {
@@ -11,34 +11,20 @@ interface TaskCardProps {
   onTaskDeleted: (uuid: string) => void;
 }
 
-export default function TaskCard({ task, onTaskUpdated, onTaskDeleted }: TaskCardProps) {
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+export default function TaskCard({ task, onTaskUpdated }: TaskCardProps) {
+  const [isUpdating] = useState(false);
 
-  const handleToggleComplete = async () => {
-    setIsUpdating(true);
-    try {
-      await updateTaskStatus(task.uuid, !task.completed);
-      onTaskUpdated({ ...task, completed: !task.completed });
-    } catch (error) {
-      console.error('Error updating task:', error);
-    } finally {
-      setIsUpdating(false);
-    }
+  // For SUI blockchain jobs, we'll disable direct updates and deletions
+  // These would require blockchain transactions
+  const handleViewOnExplorer = () => {
+    // Open SUI explorer with the job ID using the service
+    const explorerUrl = suiJobService.getExplorerUrl(task.uuid, 'object');
+    window.open(explorerUrl, '_blank');
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this task?')) return;
-    
-    setIsDeleting(true);
-    try {
-      await deleteTask(task.uuid);
-      onTaskDeleted(task.uuid);
-    } catch (error) {
-      console.error('Error deleting task:', error);
-    } finally {
-      setIsDeleting(false);
-    }
+  const handleRefresh = () => {
+    // Trigger a refresh of job data from blockchain
+    onTaskUpdated(task);
   };
 
   const getUrgencyColor = (urgency: string) => {
@@ -93,7 +79,7 @@ export default function TaskCard({ task, onTaskUpdated, onTaskDeleted }: TaskCar
               <span className="font-medium">Duration:</span> {task.estimated_duration}
             </div>
             <div>
-              <span className="font-medium">Reward:</span> {task.reward_amount}
+              <span className="font-medium">Reward:</span> {task.reward_amount} SUI
             </div>
             <div>
               <span className="font-medium">Submitter:</span>{' '}
@@ -102,7 +88,8 @@ export default function TaskCard({ task, onTaskUpdated, onTaskDeleted }: TaskCar
           </div>
           
           <div className="mt-2 text-xs text-gray-400">
-            <span className="font-medium">UUID:</span> {task.uuid}
+            <span className="font-medium">Job ID:</span>{' '}
+            <span className="font-mono break-all">{task.uuid}</span>
           </div>
           
           <div className="mt-1 text-xs text-gray-400">
@@ -112,25 +99,26 @@ export default function TaskCard({ task, onTaskUpdated, onTaskDeleted }: TaskCar
       </div>
 
       <div className="flex justify-between items-center pt-4 border-t border-gray-200">
-        <button
-          onClick={handleToggleComplete}
-          disabled={isUpdating}
-          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            task.completed
-              ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-              : 'bg-green-100 text-green-800 hover:bg-green-200'
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
-        >
-          {isUpdating ? 'Updating...' : task.completed ? 'Mark Incomplete' : 'Mark Complete'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={isUpdating}
+            className="px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isUpdating ? 'Refreshing...' : 'Refresh'}
+          </button>
+          
+          <button
+            onClick={handleViewOnExplorer}
+            className="px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors"
+          >
+            View on Explorer
+          </button>
+        </div>
         
-        <button
-          onClick={handleDelete}
-          disabled={isDeleting}
-          className="px-4 py-2 rounded-md text-sm font-medium bg-red-100 text-red-800 hover:bg-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isDeleting ? 'Deleting...' : 'Delete'}
-        </button>
+        <div className="text-xs text-gray-500">
+          On SUI Blockchain
+        </div>
       </div>
     </div>
   );
