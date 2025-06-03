@@ -2,7 +2,7 @@
 
 import { Task, TASK_STATUS } from '@/types/task';
 import { useState } from 'react';
-import { useCurrentAccount } from '@mysten/dapp-kit';
+import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { suiJobService } from '@/lib/suiJobService';
 import { useToast } from '@/components/ToastProvider';
 import { taskAPI } from '@/lib/taskAPI';
@@ -14,6 +14,7 @@ interface JobManagementPanelProps {
 
 export default function JobManagementPanel({ task, onTaskUpdated }: JobManagementPanelProps) {
   const account = useCurrentAccount();
+  const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
   const { addToast } = useToast();
   
   const [isProcessing, setIsProcessing] = useState(false);
@@ -64,7 +65,7 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
 
     try {
       // Use the taskAPI to claim the job
-      await taskAPI.claimTask(task.uuid, account.address);
+      await taskAPI.claimTask(task.uuid, account.address, signAndExecuteTransaction);
       addToast('Job claimed successfully!', 'success');
       onTaskUpdated();
     } catch (error) {
@@ -92,7 +93,7 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
 
     try {
       // Use the taskAPI to complete the job
-      await taskAPI.completeTask(task.uuid, account.address, workResult);
+      await taskAPI.completeTask(task.uuid, account.address, workResult, signAndExecuteTransaction);
       addToast('Work submitted successfully!', 'success');
       setShowWorkForm(false);
       setWorkResult('');
@@ -123,7 +124,7 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
 
     try {
       // Use the taskAPI to verify the job
-      await taskAPI.verifyTask(task.uuid, account.address);
+      await taskAPI.verifyTask(task.uuid, account.address, signAndExecuteTransaction);
       addToast('Work verified and payment released!', 'success');
       onTaskUpdated();
     } catch (error) {
@@ -151,7 +152,7 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
 
     try {
       // Use the taskAPI to reject the job
-      await taskAPI.rejectTask(task.uuid, account.address, rejectReason);
+      await taskAPI.rejectTask(task.uuid, account.address, rejectReason, signAndExecuteTransaction);
       addToast('Work rejected. Task is now available for claiming again.', 'success');
       setShowRejectForm(false);
       setRejectReason('');
