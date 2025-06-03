@@ -63,11 +63,87 @@ export class SuiJobService {
 
 
   /**
-   * Format timestamp from milliseconds
+   * Format timestamp from milliseconds or ISO string to user's local timezone
    */
   private formatTimestamp(timestamp: string | number | null): string {
     if (!timestamp) return new Date().toISOString();
-    return new Date(Number(timestamp)).toISOString();
+    
+    let date: Date;
+    
+    // Handle different timestamp formats
+    if (typeof timestamp === 'string') {
+      if (timestamp.includes('T')) {
+        // ISO string format (assume GMT if no timezone specified)
+        date = new Date(timestamp);
+      } else {
+        // Try parsing as number in string format
+        const numTimestamp = Number(timestamp);
+        if (!isNaN(numTimestamp)) {
+          date = new Date(numTimestamp);
+        } else {
+          // Fallback for other string formats
+          date = new Date(timestamp);
+        }
+      }
+    } else {
+      // Numeric timestamp (milliseconds)
+      date = new Date(Number(timestamp));
+    }
+    
+    // Ensure the date is valid
+    if (isNaN(date.getTime())) {
+      console.error('Invalid timestamp:', timestamp);
+      return new Date().toISOString();
+    }
+    
+    // Return as ISO string (JavaScript Date automatically handles timezone conversion when creating from UTC)
+    return date.toISOString();
+  }
+
+  /**
+   * Format timestamp for display in user's local timezone
+   */
+  private formatTimestampForDisplay(timestamp: string | number | null): string {
+    if (!timestamp) return new Date().toLocaleString();
+    
+    let date: Date;
+    
+    // Handle different timestamp formats
+    if (typeof timestamp === 'string') {
+      if (timestamp.includes('T')) {
+        // ISO string format - JavaScript automatically handles GMT/UTC conversion
+        date = new Date(timestamp);
+      } else {
+        // Try parsing as number in string format
+        const numTimestamp = Number(timestamp);
+        if (!isNaN(numTimestamp)) {
+          date = new Date(numTimestamp);
+        } else {
+          // Fallback for other string formats
+          date = new Date(timestamp);
+        }
+      }
+    } else {
+      // Numeric timestamp (milliseconds)
+      date = new Date(Number(timestamp));
+    }
+    
+    // Ensure the date is valid
+    if (isNaN(date.getTime())) {
+      console.error('Invalid timestamp for display:', timestamp);
+      return new Date().toLocaleString();
+    }
+    
+    // Format for display in user's local timezone
+    return date.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
   }
 
   /**
@@ -281,19 +357,14 @@ export class SuiJobService {
       // Find the first occurrence of '{' and start from there
       const jsonStart = cleanedDescription.indexOf('{');
       if (jsonStart > 0) {
-        console.log('Found JSON start at position:', jsonStart);
-        console.log('Characters before JSON:', Array.from(cleanedDescription.slice(0, jsonStart)).map(c => `${c} (${c.charCodeAt(0)})`));
         cleanedDescription = cleanedDescription.substring(jsonStart);
       }
-      
 
       jsonMetadata = JSON.parse(cleanedDescription);
     } catch (error) {
-      console.error('JSON parsing failed:', error);
-      console.error('Input description:', details?.description || event.parsedJson.description || '');
-      console.error('Error message:', error instanceof Error ? error.message : String(error));
+      // JSON parsing failed - this is normal for non-JSON descriptions
+      console.log('JSON parsing failed for job:', event.parsedJson.job_id, 'Using blockchain data.');
     }
-    console.log('Parsed JSON metadata:', jsonMetadata);
     // Determine urgency - prefer JSON metadata, then reward-based calculation
     let urgency: 'low' | 'standard' | 'high' | 'urgent' = 'standard';
     if (jsonMetadata?.urgency && 
@@ -325,13 +396,31 @@ export class SuiJobService {
       rewardAmount = `${details.rewardAmount} SUI`;
     }
 
-    // Debug logging for reward amount
-    console.log('Debug reward amount:', {
-      jsonMetadata: jsonMetadata,
+    // Determine timestamp - prefer JSON metadata (which may be in GMT), then blockchain timestamps
+    let displayTimestamp: string;
+    if (jsonMetadata?.timestamp && typeof jsonMetadata.timestamp === 'string') {
+      // Use timestamp from JSON metadata (assume GMT) and convert to user's timezone for display
+      displayTimestamp = this.formatTimestampForDisplay(jsonMetadata.timestamp);
+    } else {
+      // Fall back to blockchain timestamps
+      displayTimestamp = this.formatTimestampForDisplay(timestamps?.createdAt || event.timestampMs);
+    }
+
+    // Debug logging for reward amount and timestamp conversion
+    console.log('Debug conversion:', {
       jobId: event.parsedJson.job_id,
+      rewardSource: jsonMetadata?.reward_amount ? 'jsonMetadata' : 'blockchain',
       jsonReward: jsonMetadata?.reward_amount,
       blockchainReward: details?.rewardAmount,
-      finalReward: rewardAmount
+      finalReward: rewardAmount,
+      timestampSource: jsonMetadata?.timestamp ? 'jsonMetadata (GMT)' : 'blockchain',
+      jsonTimestamp: jsonMetadata?.timestamp,
+      blockchainTimestamp: timestamps?.createdAt,
+      eventTimestamp: event.timestampMs,
+      finalTimestamp: displayTimestamp,
+      userTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      gmtToLocalConversion: jsonMetadata?.timestamp ? 
+        `${jsonMetadata.timestamp} -> ${displayTimestamp}` : 'N/A'
     });
 
     return {
@@ -341,7 +430,7 @@ export class SuiJobService {
       category: parsedPayload.category,
       urgency,
       submitter: event.parsedJson.submitter,
-      timestamp: this.formatTimestamp(timestamps?.createdAt || event.timestampMs),
+      timestamp: displayTimestamp,
       estimated_duration: estimatedDuration,
       reward_amount: rewardAmount,
       completed: details?.status === SuiJobStatus.COMPLETED || details?.status === SuiJobStatus.VERIFIED
