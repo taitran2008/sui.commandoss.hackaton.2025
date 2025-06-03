@@ -91,9 +91,29 @@ function parseJobDescription(description: string): { name: string; description: 
   }
 }
 
+// Check if an object exists on the blockchain
+async function objectExists(objectId: string): Promise<boolean> {
+  try {
+    const object = await client.getObject({
+      id: objectId,
+      options: { showType: true }
+    })
+    return object.data !== null && object.error === undefined
+  } catch (error) {
+    return false
+  }
+}
+
 // Get job details using devInspectTransactionBlock
 async function getJobDetails(jobId: string): Promise<any> {
   try {
+    // First check if the object exists to avoid the "deleted" error
+    const exists = await objectExists(jobId)
+    if (!exists) {
+      console.log(`Job ${jobId} has been deleted or does not exist`)
+      return null
+    }
+
     const txb = new Transaction()
     txb.moveCall({
       target: `${CONTRACT_CONFIG.PACKAGE_ID}::job_queue::get_job_details`,
@@ -128,6 +148,12 @@ async function getJobDetails(jobId: string): Promise<any> {
       }
     }
   } catch (error) {
+    // Check if the error is due to deleted object
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    if (errorMessage.includes('deleted') || errorMessage.includes('Invalid object')) {
+      console.log(`Job ${jobId} has been deleted`)
+      return null
+    }
     console.error(`Error getting job details for ${jobId}:`, error)
     return null
   }
@@ -137,6 +163,13 @@ async function getJobDetails(jobId: string): Promise<any> {
 // Get job timestamps
 async function getJobTimestamps(jobId: string): Promise<any> {
   try {
+    // First check if the object exists to avoid the "deleted" error
+    const exists = await objectExists(jobId)
+    if (!exists) {
+      console.log(`Job ${jobId} has been deleted or does not exist`)
+      return null
+    }
+
     const txb = new Transaction()
     txb.moveCall({
       target: `${CONTRACT_CONFIG.PACKAGE_ID}::job_queue::get_job_timestamps`,
@@ -164,6 +197,12 @@ async function getJobTimestamps(jobId: string): Promise<any> {
       }
     }
   } catch (error) {
+    // Check if the error is due to deleted object
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    if (errorMessage.includes('deleted') || errorMessage.includes('Invalid object')) {
+      console.log(`Job ${jobId} has been deleted`)
+      return null
+    }
     console.error(`Error getting job timestamps for ${jobId}:`, error)
     return null
   }
@@ -208,13 +247,28 @@ export async function fetchWalletJobs(walletAddress: string): Promise<WalletJob[
         const jobDetails = await getJobDetails(jobId)
         const jobTimestamps = await getJobTimestamps(jobId)
         
+        // If job details are null (deleted job), create a special entry
+        if (!jobDetails) {
+          console.log(`Job ${jobId} appears to be deleted, creating deleted job entry`)
+          jobs.push({
+            id: jobId,
+            name: 'Deleted Job',
+            status: 'Deleted',
+            timestamp: formatTimestamp(event.timestampMs || undefined),
+            description: 'This job has been deleted from the blockchain',
+            eventId: event.id.eventSeq || undefined,
+            transactionDigest: event.id.txDigest
+          })
+          continue
+        }
+        
         // Parse the job description to extract name and description
-        const parsedJob = jobDetails ? parseJobDescription(jobDetails.description) : { name: `Job ${jobId.slice(-8)}`, description: '' }
+        const parsedJob = parseJobDescription(jobDetails.description)
         
         const job: WalletJob = {
           id: jobId,
           name: parsedJob.name,
-          status: jobDetails ? getJobStatusString(jobDetails.status) : 'Unknown',
+          status: getJobStatusString(jobDetails.status),
           timestamp: formatTimestamp(event.timestampMs || undefined),
           rewardAmount: jobDetails?.rewardAmount || undefined,
           description: parsedJob.description,
@@ -234,8 +288,9 @@ export async function fetchWalletJobs(walletAddress: string): Promise<WalletJob[
         jobs.push({
           id: jobId,
           name: `Job ${jobId.slice(-8)}`,
-          status: 'Unknown',
+          status: 'Error',
           timestamp: formatTimestamp(event.timestampMs || undefined),
+          description: 'Failed to load job details',
           eventId: event.id.eventSeq || undefined,
           transactionDigest: event.id.txDigest
         })

@@ -12,6 +12,22 @@ import { Transaction } from '@mysten/sui/transactions';
 import { Task } from '@/types/task';
 import { SUI_CONTRACT_CONFIG, SuiNetwork } from '@/config/sui';
 
+// Type for the signAndExecuteTransaction function from @mysten/dapp-kit
+// Using the actual types from the library
+type SignAndExecuteTransactionFunction = (
+  args: {
+    transaction: Transaction;
+    options?: {
+      showEffects?: boolean;
+      showEvents?: boolean;
+    };
+  },
+  callbacks?: {
+    onSuccess?: (data: any) => void;
+    onError?: (error: Error) => void;
+  }
+) => void;
+
 // Contract constants from configuration
 const PACKAGE_ID = SUI_CONTRACT_CONFIG.PACKAGE_ID;
 
@@ -212,10 +228,32 @@ export class SuiJobService {
   }
 
   /**
+   * Check if an object exists on the blockchain
+   */
+  private async objectExists(objectId: string): Promise<boolean> {
+    try {
+      const object = await this.client.getObject({
+        id: objectId,
+        options: { showType: true }
+      });
+      return object.data !== null && object.error === undefined;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
    * Get detailed job information using devInspectTransactionBlock
    */
   async getJobDetails(jobId: string): Promise<SuiJobDetails | null> {
     try {
+      // First check if the object exists to avoid the "deleted" error
+      const exists = await this.objectExists(jobId);
+      if (!exists) {
+        console.log(`Job ${jobId} has been deleted or does not exist`);
+        return null;
+      }
+
       const txb = new Transaction();
       txb.moveCall({
         target: `${PACKAGE_ID}::job_queue::get_job_details`,
@@ -250,6 +288,12 @@ export class SuiJobService {
         };
       }
     } catch (error) {
+      // Check if the error is due to deleted object
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('deleted') || errorMessage.includes('Invalid object')) {
+        console.log(`Job ${jobId} has been deleted`);
+        return null;
+      }
       console.error(`Error getting job details for ${jobId}:`, error);
       return null;
     }
@@ -261,6 +305,13 @@ export class SuiJobService {
    */
   async getJobTimestamps(jobId: string): Promise<SuiJobTimestamps | null> {
     try {
+      // First check if the object exists to avoid the "deleted" error
+      const exists = await this.objectExists(jobId);
+      if (!exists) {
+        console.log(`Job ${jobId} has been deleted or does not exist`);
+        return null;
+      }
+
       const txb = new Transaction();
       txb.moveCall({
         target: `${PACKAGE_ID}::job_queue::get_job_timestamps`,
@@ -289,6 +340,12 @@ export class SuiJobService {
         };
       }
     } catch (error) {
+      // Check if the error is due to deleted object
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('deleted') || errorMessage.includes('Invalid object')) {
+        console.log(`Job ${jobId} has been deleted`);
+        return null;
+      }
       console.error(`Error getting job timestamps for ${jobId}:`, error);
       return null;
     }
@@ -361,7 +418,7 @@ export class SuiJobService {
       }
 
       jsonMetadata = JSON.parse(cleanedDescription);
-    } catch (error) {
+    } catch {
       // JSON parsing failed - this is normal for non-JSON descriptions
       console.log('JSON parsing failed for job:', event.parsedJson.job_id, 'Using blockchain data.');
     }
@@ -452,15 +509,52 @@ export class SuiJobService {
       for (const event of jobEvents) {
         const jobId = event.parsedJson.job_id;
         
-        // Get detailed job information
-        const [jobDetails, jobTimestamps] = await Promise.all([
-          this.getJobDetails(jobId),
-          this.getJobTimestamps(jobId)
-        ]);
+        try {
+          // Get detailed job information
+          const [jobDetails, jobTimestamps] = await Promise.all([
+            this.getJobDetails(jobId),
+            this.getJobTimestamps(jobId)
+          ]);
 
-        // Convert to Task format
-        const task = this.convertSuiJobToTask(event, jobDetails, jobTimestamps);
-        tasks.push(task);
+          // If job details are null (deleted job), create a placeholder task
+          if (!jobDetails) {
+            console.log(`Job ${jobId} appears to be deleted, creating placeholder entry`);
+            const deletedTask: Task = {
+              uuid: jobId,
+              task: 'Deleted Job',
+              description: 'This job has been deleted from the blockchain',
+              category: 'other',
+              urgency: 'low',
+              submitter: event.parsedJson.submitter,
+              timestamp: this.formatTimestampForDisplay(event.timestampMs),
+              estimated_duration: 'N/A',
+              reward_amount: 'N/A',
+              completed: true // Mark as completed since it's deleted
+            };
+            tasks.push(deletedTask);
+            continue;
+          }
+
+          // Convert to Task format with valid job details
+          const task = this.convertSuiJobToTask(event, jobDetails, jobTimestamps);
+          tasks.push(task);
+        } catch (error) {
+          console.error(`Error processing job ${jobId}:`, error);
+          // Create a fallback task for jobs that failed to process
+          const fallbackTask: Task = {
+            uuid: jobId,
+            task: 'Error Loading Job',
+            description: 'Failed to load job details from the blockchain',
+            category: 'other',
+            urgency: 'low',
+            submitter: event.parsedJson.submitter,
+            timestamp: this.formatTimestampForDisplay(event.timestampMs),
+            estimated_duration: 'N/A',
+            reward_amount: 'N/A',
+            completed: false
+          };
+          tasks.push(fallbackTask);
+        }
       }
 
       return tasks;
@@ -491,6 +585,235 @@ export class SuiJobService {
     } catch (error) {
       console.error('Error getting SUI balance:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Delete Job Workflow Methods
+   * These methods implement the self-verification workflow for deleting jobs
+   */
+
+  /**
+   * Step 1: Claim a job (for self-verification)
+   */
+  async claimJob(jobId: string, signAndExecuteTransaction: SignAndExecuteTransactionFunction): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      try {
+        const transaction = new Transaction();
+        
+        transaction.moveCall({
+          target: `${PACKAGE_ID}::job_queue::claim_job`,
+          arguments: [
+            transaction.object(SUI_CONTRACT_CONFIG.MANAGER_ID),
+            transaction.object(jobId),
+            transaction.object(SUI_CONTRACT_CONFIG.CLOCK_ID),
+          ],
+        });
+
+        signAndExecuteTransaction(
+          {
+            transaction,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          },
+          {
+            onSuccess: (result) => {
+              console.log('Claim job transaction result:', result);
+              resolve({ success: true });
+            },
+            onError: (error) => {
+              console.error('Error claiming job:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error claiming job:', error);
+        resolve({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    });
+  }
+
+  /**
+   * Step 2: Complete a job with cancellation message
+   */
+  async completeJob(jobId: string, signAndExecuteTransaction: SignAndExecuteTransactionFunction): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      try {
+        const transaction = new Transaction();
+        
+        transaction.moveCall({
+          target: `${PACKAGE_ID}::job_queue::complete_job`,
+          arguments: [
+            transaction.object(jobId),
+            transaction.pure.string("JOB CANCELLED BY SUBMITTER - Self-verification for deletion"),
+            transaction.object(SUI_CONTRACT_CONFIG.CLOCK_ID),
+          ],
+        });
+
+        signAndExecuteTransaction(
+          {
+            transaction,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          },
+          {
+            onSuccess: (result) => {
+              console.log('Complete job transaction result:', result);
+              resolve({ success: true });
+            },
+            onError: (error) => {
+              console.error('Error completing job:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error completing job:', error);
+        resolve({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    });
+  }
+
+  /**
+   * Step 3: Verify and release payment to self
+   */
+  async verifyAndRelease(jobId: string, signAndExecuteTransaction: SignAndExecuteTransactionFunction): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      try {
+        const transaction = new Transaction();
+        
+        transaction.moveCall({
+          target: `${PACKAGE_ID}::job_queue::verify_and_release`,
+          arguments: [
+            transaction.object(jobId),
+            transaction.object(SUI_CONTRACT_CONFIG.CLOCK_ID),
+          ],
+        });
+
+        signAndExecuteTransaction(
+          {
+            transaction,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          },
+          {
+            onSuccess: (result) => {
+              console.log('Verify and release transaction result:', result);
+              resolve({ success: true });
+            },
+            onError: (error) => {
+              console.error('Error verifying and releasing job:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error verifying and releasing job:', error);
+        resolve({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    });
+  }
+
+  /**
+   * Step 4: Delete the verified job to get storage rebate
+   */
+  async deleteJob(jobId: string, signAndExecuteTransaction: SignAndExecuteTransactionFunction): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      try {
+        const transaction = new Transaction();
+        
+        transaction.moveCall({
+          target: `${PACKAGE_ID}::job_queue::delete_job`,
+          arguments: [
+            transaction.object(jobId),
+          ],
+        });
+
+        signAndExecuteTransaction(
+          {
+            transaction,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          },
+          {
+            onSuccess: (result) => {
+              console.log('Delete job transaction result:', result);
+              resolve({ success: true });
+            },
+            onError: (error) => {
+              console.error('Error deleting job:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error deleting job:', error);
+        resolve({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    });
+  }
+
+  /**
+   * Complete self-verification workflow to delete a job
+   * This executes all 4 steps in sequence: claim, complete, verify & release, delete
+   */
+  async deleteJobWorkflow(
+    jobId: string, 
+    signAndExecuteTransaction: SignAndExecuteTransactionFunction,
+    onProgress?: (step: number, message: string) => void
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Step 1: Claim the job
+      onProgress?.(1, 'Claiming job...');
+      const claimResult = await this.claimJob(jobId, signAndExecuteTransaction);
+      if (!claimResult.success) {
+        return { success: false, error: `Failed to claim job: ${claimResult.error}` };
+      }
+
+      // Wait for transaction to be finalized
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Step 2: Complete the job
+      onProgress?.(2, 'Completing job with cancellation message...');
+      const completeResult = await this.completeJob(jobId, signAndExecuteTransaction);
+      if (!completeResult.success) {
+        return { success: false, error: `Failed to complete job: ${completeResult.error}` };
+      }
+
+      // Wait for transaction to be finalized
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Step 3: Verify and release payment
+      onProgress?.(3, 'Verifying and releasing payment...');
+      const verifyResult = await this.verifyAndRelease(jobId, signAndExecuteTransaction);
+      if (!verifyResult.success) {
+        return { success: false, error: `Failed to verify and release: ${verifyResult.error}` };
+      }
+
+      // Wait for transaction to be finalized
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Step 4: Delete the job
+      onProgress?.(4, 'Deleting job and reclaiming storage...');
+      const deleteResult = await this.deleteJob(jobId, signAndExecuteTransaction);
+      if (!deleteResult.success) {
+        return { success: false, error: `Failed to delete job: ${deleteResult.error}` };
+      }
+
+      onProgress?.(4, 'Job deleted successfully!');
+      return { success: true };
+    } catch (error) {
+      console.error('Error in delete job workflow:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }

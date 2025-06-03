@@ -32,6 +32,8 @@ export const SUI_CONTRACT_CONFIG = {
     SUBMIT_JOB: 'job_queue::submit_job',
     CLAIM_JOB: 'job_queue::claim_job',
     COMPLETE_JOB: 'job_queue::complete_job',
+    VERIFY_AND_RELEASE: 'job_queue::verify_and_release',
+    DELETE_JOB: 'job_queue::delete_job',
   },
   
   // Event Types
