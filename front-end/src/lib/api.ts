@@ -1,5 +1,5 @@
 import { Task } from '@/types/task';
-import { taskAPI } from './taskAPI';
+import { taskAPI, WalletInfo } from './taskAPI';
 
 /**
  * Legacy API functions that delegate to the new TaskAPI class
@@ -10,8 +10,11 @@ export const fetchTasks = async (): Promise<Task[]> => {
   return await taskAPI.getAllTasks();
 };
 
-export const createTask = async (taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>): Promise<Task> => {
-  return await taskAPI.createTask(taskData);
+export const createTask = async (
+  taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
+  walletInfo?: WalletInfo
+): Promise<Task> => {
+  return await taskAPI.createTask(taskData, walletInfo);
 };
 
 export const updateTaskStatus = async (uuid: string, completed: boolean): Promise<Task> => {

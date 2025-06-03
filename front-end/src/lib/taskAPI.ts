@@ -1,10 +1,33 @@
 import { Task } from '@/types/task';
 import { generateTaskUUID } from '@/utils/taskUtils';
 import { APP_CONFIG } from '@/config/app';
+import { suiJobService } from '@/lib/suiJobService';
+import { Transaction } from '@mysten/sui/transactions';
 
 /**
  * Enhanced API utilities for backend integration with proper UUID handling
  */
+
+// Type for the signAndExecuteTransaction function from @mysten/dapp-kit
+type SignAndExecuteTransactionFunction = (
+  args: {
+    transaction: Transaction;
+    options?: {
+      showEffects?: boolean;
+      showEvents?: boolean;
+    };
+  },
+  callbacks?: {
+    onSuccess?: (data: unknown) => void;
+    onError?: (error: Error) => void;
+  }
+) => void;
+
+// Interface for wallet information needed for task creation
+export interface WalletInfo {
+  address: string;
+  signAndExecuteTransaction: SignAndExecuteTransactionFunction;
+}
 
 export class TaskAPI {
   private baseUrl: string;
@@ -35,34 +58,166 @@ export class TaskAPI {
   }
 
   /**
-   * Create a new task
+   * Create a new task - now integrated with SUI blockchain
    */
-  async createTask(taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>): Promise<Task> {
+  async createTask(
+    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
+    walletInfo?: WalletInfo
+  ): Promise<Task> {
     try {
-      const newTask: Task = {
-        ...taskData,
-        uuid: generateTaskUUID(),
-        timestamp: new Date().toISOString(),
-        submitter: this.generateMockWalletAddress(),
-        completed: false
-      };
-
-      // In a real implementation:
-      // const response = await fetch(`${this.baseUrl}/tasks`, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(formatTaskForBackend(newTask))
-      // });
-      // const data = await response.json();
-      // return parseTaskFromBackend(data);
-
-      // For now, simulate API delay and return the task
-      await this.simulateDelay(300);
-      return newTask;
+      // If wallet info is provided, submit to SUI blockchain
+      if (walletInfo) {
+        return await this.createSuiTask(taskData, walletInfo);
+      } else {
+        // Fallback to mock task for cases where wallet is not connected
+        return await this.createMockTask(taskData);
+      }
     } catch (error) {
       console.error('Error creating task:', error);
       throw new Error('Failed to create task');
     }
+  }
+
+  /**
+   * Create a task on SUI blockchain
+   */
+  private async createSuiTask(
+    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
+    walletInfo: WalletInfo
+  ): Promise<Task> {
+    // Create job description similar to JobSubmissionForm
+    const jobDescription = this.createJobDescription(taskData);
+    
+    // Parse reward amount (remove "SUI" suffix if present)
+    const rewardAmountStr = taskData.reward_amount.replace(/\s*SUI\s*$/i, '');
+    const rewardAmount = parseFloat(rewardAmountStr);
+    
+    if (isNaN(rewardAmount) || rewardAmount <= 0) {
+      throw new Error('Invalid reward amount');
+    }
+
+    // Calculate timeout in minutes from estimated_duration
+    const timeoutMinutes = this.parseEstimatedDurationToMinutes(taskData.estimated_duration);
+
+    console.log('🔗 Submitting task to SUI blockchain:', {
+      description: jobDescription,
+      rewardAmount,
+      timeoutMinutes,
+      walletAddress: walletInfo.address
+    });
+
+    // Submit job to SUI blockchain
+    const result = await suiJobService.submitJob(
+      jobDescription,
+      rewardAmount,
+      timeoutMinutes,
+      walletInfo.signAndExecuteTransaction
+    );
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to submit job to blockchain');
+    }
+
+    // Create the task object with blockchain job ID as UUID
+    const newTask: Task = {
+      ...taskData,
+      uuid: result.jobId || generateTaskUUID(),
+      timestamp: new Date().toISOString(),
+      submitter: walletInfo.address,
+      completed: false
+    };
+
+    console.log('✅ Task created successfully on SUI blockchain:', {
+      uuid: newTask.uuid,
+      jobId: result.jobId,
+      submitter: newTask.submitter,
+      task: newTask.task,
+      rewardAmount: newTask.reward_amount
+    });
+    return newTask;
+  }
+
+  /**
+   * Create a mock task (fallback when wallet not connected)
+   */
+  private async createMockTask(
+    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>
+  ): Promise<Task> {
+    const newTask: Task = {
+      ...taskData,
+      uuid: generateTaskUUID(),
+      timestamp: new Date().toISOString(),
+      submitter: this.generateMockWalletAddress(),
+      completed: false
+    };
+
+    // Simulate API delay
+    await this.simulateDelay(300);
+    return newTask;
+  }
+
+  /**
+   * Create job description similar to JobSubmissionForm
+   */
+  private createJobDescription(taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>): string {
+    const urgencyEmoji = this.getUrgencyEmoji(taskData.urgency);
+    const categoryEmoji = this.getCategoryEmoji(taskData.category);
+    
+    return `${urgencyEmoji} ${taskData.task}\n\n${categoryEmoji} Category: ${taskData.category}\n📝 ${taskData.description}\n⏱️ Duration: ${taskData.estimated_duration}\n💰 Reward: ${taskData.reward_amount}`;
+  }
+
+  /**
+   * Parse estimated duration string to minutes
+   */
+  private parseEstimatedDurationToMinutes(duration: string): number {
+    // Default timeout if parsing fails
+    let timeoutMinutes = 120;
+    
+    // Extract number from duration string (e.g., "2 hours" -> 2)
+    const match = duration.match(/(\d+)/);
+    if (match) {
+      const value = parseInt(match[1]);
+      if (duration.toLowerCase().includes('hour')) {
+        timeoutMinutes = value * 60;
+      } else if (duration.toLowerCase().includes('minute')) {
+        timeoutMinutes = value;
+      } else if (duration.toLowerCase().includes('day')) {
+        timeoutMinutes = value * 24 * 60;
+      }
+    }
+    
+    // Ensure timeout is within SUI contract limits (30 minutes to 48 hours)
+    return Math.max(30, Math.min(2880, timeoutMinutes));
+  }
+
+  /**
+   * Get urgency emoji
+   */
+  private getUrgencyEmoji(urgency: string): string {
+    const urgencyMap: Record<string, string> = {
+      low: '🔵',
+      standard: '🟡',
+      high: '🟠',
+      urgent: '🔴'
+    };
+    return urgencyMap[urgency] || '🟡';
+  }
+
+  /**
+   * Get category emoji
+   */
+  private getCategoryEmoji(category: string): string {
+    const categoryMap: Record<string, string> = {
+      translation: '🌐',
+      'data-entry': '📊',
+      writing: '✍️',
+      design: '🎨',
+      development: '💻',
+      research: '🔍',
+      marketing: '📢',
+      system: '⚙️'
+    };
+    return categoryMap[category] || '📋';
   }
 
   /**

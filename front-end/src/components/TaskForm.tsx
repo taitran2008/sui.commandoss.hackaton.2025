@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { Task, TaskFormData } from '@/types/task';
 import { createTask } from '@/lib/api';
 
@@ -9,6 +10,9 @@ interface TaskFormProps {
 }
 
 export default function TaskForm({ onTaskCreated }: TaskFormProps) {
+  const account = useCurrentAccount();
+  const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
+  
   const [formData, setFormData] = useState<TaskFormData>({
     task: '',
     description: '',
@@ -24,7 +28,17 @@ export default function TaskForm({ onTaskCreated }: TaskFormProps) {
     setIsSubmitting(true);
 
     try {
-      const newTask = await createTask(formData);
+      let walletInfo;
+      
+      // Always use blockchain mode - wallet must be connected
+      if (account) {
+        walletInfo = {
+          address: account.address,
+          signAndExecuteTransaction
+        };
+      }
+      
+      const newTask = await createTask(formData, walletInfo);
       onTaskCreated(newTask);
       
       // Reset form
@@ -38,6 +52,7 @@ export default function TaskForm({ onTaskCreated }: TaskFormProps) {
       });
     } catch (error) {
       console.error('Error creating task:', error);
+      alert(`Failed to create task: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -155,12 +170,29 @@ export default function TaskForm({ onTaskCreated }: TaskFormProps) {
           </div>
         </div>
 
+        {/* Wallet Connection Warning */}
+        {!account && (
+          <div className="bg-yellow-100 border border-yellow-300 rounded-md p-4">
+            <div className="text-sm text-yellow-800">
+              ⚠️ Wallet not connected. Please connect your wallet to create tasks on the SUI blockchain.
+            </div>
+          </div>
+        )}
+
+        {account && (
+          <div className="bg-green-100 border border-green-300 rounded-md p-4">
+            <div className="text-sm text-green-800">
+              ✅ Ready to submit to SUI blockchain with wallet: {account.address.slice(0, 6)}...{account.address.slice(-4)}
+            </div>
+          </div>
+        )}
+
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !account}
           className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isSubmitting ? 'Creating Task...' : 'Create Task'}
+          {isSubmitting ? 'Creating Task...' : 'Create Task on SUI Blockchain'}
         </button>
       </form>
     </div>
