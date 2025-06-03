@@ -772,9 +772,9 @@ export class SuiJobService {
   }
 
   /**
-   * Step 2: Complete a job with cancellation message
+   * Step 2: Complete a job with result
    */
-  async completeJob(jobId: string, signAndExecuteTransaction: SignAndExecuteTransactionFunction): Promise<{ success: boolean; error?: string }> {
+  async completeJob(jobId: string, result: string, signAndExecuteTransaction: SignAndExecuteTransactionFunction): Promise<{ success: boolean; error?: string }> {
     return new Promise((resolve) => {
       try {
         const transaction = new Transaction();
@@ -783,7 +783,7 @@ export class SuiJobService {
           target: `${PACKAGE_ID}::job_queue::complete_job`,
           arguments: [
             transaction.object(jobId),
-            transaction.pure.string("JOB CANCELLED BY SUBMITTER - Self-verification for deletion"),
+            transaction.pure.string(result),
             transaction.object(SUI_CONTRACT_CONFIG.CLOCK_ID),
           ],
         });
@@ -919,7 +919,7 @@ export class SuiJobService {
 
       // Step 2: Complete the job
       onProgress?.(2, 'Completing job with cancellation message...');
-      const completeResult = await this.completeJob(jobId, signAndExecuteTransaction);
+      const completeResult = await this.completeJob(jobId, "JOB CANCELLED BY SUBMITTER - Self-verification for deletion", signAndExecuteTransaction);
       if (!completeResult.success) {
         return { success: false, error: `Failed to complete job: ${completeResult.error}` };
       }

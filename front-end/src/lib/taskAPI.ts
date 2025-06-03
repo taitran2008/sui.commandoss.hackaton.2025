@@ -428,7 +428,7 @@ export class TaskAPI {
       }
 
       // Use real SUI blockchain API to complete the job
-      const completeResult = await suiJobService.completeJob(taskId, signAndExecuteTransaction);
+      const completeResult = await suiJobService.completeJob(taskId, result, signAndExecuteTransaction);
       
       if (!completeResult.success) {
         throw new Error(completeResult.error || 'Failed to complete task on blockchain');
