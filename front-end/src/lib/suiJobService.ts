@@ -23,7 +23,7 @@ type SignAndExecuteTransactionFunction = (
     };
   },
   callbacks?: {
-    onSuccess?: (data: any) => void;
+    onSuccess?: (data: unknown) => void;
     onError?: (error: Error) => void;
   }
 ) => void;
@@ -237,7 +237,7 @@ export class SuiJobService {
         options: { showType: true }
       });
       return object.data !== null && object.error === undefined;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
@@ -815,6 +815,145 @@ export class SuiJobService {
       console.error('Error in delete job workflow:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
+  }
+
+  /**
+   * Reject a completed job and make it available for other workers
+   * This corresponds to step 5 in case2.js where Alice rejects Bob's poor quality work
+   */
+  async rejectJob(
+    jobId: string, 
+    reason: string,
+    signAndExecuteTransaction: SignAndExecuteTransactionFunction
+  ): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      try {
+        const transaction = new Transaction();
+        
+        transaction.moveCall({
+          target: `${PACKAGE_ID}::job_queue::reject_job`,
+          arguments: [
+            transaction.object(SUI_CONTRACT_CONFIG.MANAGER_ID),
+            transaction.object(jobId),
+            transaction.pure.string(reason),
+            transaction.object(SUI_CONTRACT_CONFIG.CLOCK_ID),
+          ],
+        });
+
+        signAndExecuteTransaction(
+          {
+            transaction,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          },
+          {
+            onSuccess: (result) => {
+              console.log('Reject job transaction result:', result);
+              resolve({ success: true });
+            },
+            onError: (error) => {
+              console.error('Error rejecting job:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error rejecting job:', error);
+        resolve({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    });
+  }
+
+  /**
+   * Submit a new job to the blockchain
+   * This creates a new job with description, reward amount, and timeout
+   */
+  async submitJob(
+    description: string,
+    rewardAmountSui: number,
+    timeoutMinutes: number,
+    signAndExecuteTransaction: SignAndExecuteTransactionFunction
+  ): Promise<{ success: boolean; jobId?: string; error?: string }> {
+    return new Promise((resolve) => {
+      try {
+        // Validate inputs
+        if (!description.trim()) {
+          resolve({ success: false, error: 'Job description cannot be empty' });
+          return;
+        }
+        
+        if (rewardAmountSui <= 0) {
+          resolve({ success: false, error: 'Reward amount must be greater than 0' });
+          return;
+        }
+        
+        if (timeoutMinutes < 30 || timeoutMinutes > 2880) {
+          resolve({ success: false, error: 'Timeout must be between 30 and 2880 minutes (48 hours)' });
+          return;
+        }
+
+        const transaction = new Transaction();
+        
+        // Convert SUI to MIST (1 SUI = 1,000,000,000 MIST)
+        const rewardAmountMist = Math.floor(rewardAmountSui * 1000000000);
+        
+        // Split coins for the reward
+        const [coin] = transaction.splitCoins(transaction.gas, [transaction.pure.u64(rewardAmountMist)]);
+        
+        transaction.moveCall({
+          target: `${PACKAGE_ID}::job_queue::submit_job`,
+          arguments: [
+            transaction.object(SUI_CONTRACT_CONFIG.MANAGER_ID),
+            transaction.pure.string(description),
+            coin,
+            transaction.pure.u64(timeoutMinutes),
+            transaction.object(SUI_CONTRACT_CONFIG.CLOCK_ID),
+          ],
+        });
+
+        signAndExecuteTransaction(
+          {
+            transaction,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          },
+          {
+            onSuccess: (result: unknown) => {
+              console.log('Submit job transaction result:', result);
+              
+              // Extract job ID from created objects
+              let jobId = null;
+              if (result && typeof result === 'object' && 'effects' in result) {
+                const effects = (result as { effects?: { created?: Array<{ owner?: unknown; reference?: { objectId: string } }> } }).effects;
+                if (effects?.created) {
+                  const createdObjects = effects.created;
+                  // Find the job object (it should be the shared object)
+                  const jobObject = createdObjects.find((obj: { owner?: unknown; reference?: { objectId: string } }) => 
+                    obj.owner && typeof obj.owner === 'object' && 'Shared' in obj.owner
+                  );
+                  if (jobObject?.reference?.objectId) {
+                    jobId = jobObject.reference.objectId;
+                  }
+                }
+              }
+              
+              resolve({ success: true, jobId: jobId || undefined });
+            },
+            onError: (error) => {
+              console.error('Error submitting job:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error submitting job:', error);
+        resolve({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+      }
+    });
   }
 }
 

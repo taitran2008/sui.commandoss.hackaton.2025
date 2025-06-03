@@ -6,14 +6,16 @@ import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-ki
 import { suiJobService } from '@/lib/suiJobService';
 import { useToast } from '@/components/ToastProvider';
 import AddressDisplay from './AddressDisplay';
+import JobManagementPanel from './JobManagementPanel';
 
 interface TaskCardProps {
   task: Task;
-  onTaskUpdated: (task: Task) => void;
+  onTaskUpdated?: (task: Task) => void;
   onTaskDeleted: (uuid: string) => void;
+  onJobRefresh?: () => void;
 }
 
-export default function TaskCard({ task, onTaskDeleted }: TaskCardProps) {
+export default function TaskCard({ task, onTaskDeleted, onJobRefresh }: TaskCardProps) {
   const account = useCurrentAccount();
   const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
   const { addToast } = useToast();
@@ -183,6 +185,14 @@ export default function TaskCard({ task, onTaskDeleted }: TaskCardProps) {
             {deleteStep}
           </div>
         )}
+      </div>
+
+      {/* Job Management Panel - always visible */}
+      <div className="mt-4">
+        <JobManagementPanel 
+          task={task} 
+          onTaskUpdated={() => onJobRefresh?.()} 
+        />
       </div>
     </div>
   );
