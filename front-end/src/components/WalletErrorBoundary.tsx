@@ -41,19 +41,36 @@ export default class WalletErrorBoundary extends Component<Props, State> {
             <h3 className="text-sm font-medium text-red-800">Wallet Connection Error</h3>
           </div>
           <p className="text-sm text-red-700 mb-3">
-            There was an error connecting to your SUI wallet. Please try the following:
+            There was an error with the wallet component. Please try the following:
           </p>
           <ul className="text-sm text-red-700 list-disc list-inside space-y-1 mb-3">
-            <li>Make sure you have a SUI wallet extension installed</li>
-            <li>Check that your wallet is unlocked</li>
-            <li>Refresh the page and try again</li>
+            <li>Make sure you have a SUI wallet extension installed (Sui Wallet, Martian, etc.)</li>
+            <li>Check that your wallet is unlocked and connected to the correct network</li>
+            <li>Try refreshing the page</li>
+            <li>Clear your browser cache and cookies</li>
           </ul>
-          <button
-            onClick={() => this.setState({ hasError: false, error: undefined })}
-            className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-          >
-            Try Again
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => this.setState({ hasError: false, error: undefined })}
+              className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-3 py-1 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+          {this.state.error && (
+            <details className="mt-3">
+              <summary className="text-xs text-red-600 cursor-pointer">Show error details</summary>
+              <pre className="text-xs text-red-600 mt-1 p-2 bg-red-100 rounded overflow-auto">
+                {this.state.error.message}
+              </pre>
+            </details>
+          )}
         </div>
       );
     }

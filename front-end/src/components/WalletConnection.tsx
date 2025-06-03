@@ -12,12 +12,21 @@ export default function WalletConnection() {
   const { addToast } = useToast();
   const [balance, setBalance] = useState<string>('0');
   const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [componentError, setComponentError] = useState<string | null>(null);
   const hasShownConnectToast = useRef(false);
+  const mountedRef = useRef(true);
+
+  // Track wallet connection state more reliably
+  useEffect(() => {
+    setIsConnected(!!account?.address);
+  }, [account?.address]);
 
   const fetchBalance = useCallback(async () => {
-    if (!account?.address) return;
+    if (!account?.address || !mountedRef.current) return;
     
     setLoading(true);
+    setComponentError(null);
     try {
       const balance = await suiClient.getBalance({
         owner: account.address,
@@ -25,16 +34,25 @@ export default function WalletConnection() {
       
       // Convert from MIST to SUI using utility function
       const formattedBalance = formatSuiBalance(balance.totalBalance);
-      setBalance(formattedBalance);
+      if (mountedRef.current) {
+        setBalance(formattedBalance);
+      }
     } catch (error) {
       console.error('Error fetching balance:', error);
-      setBalance('Error');
-      // Use a stable toast error message without including addToast in dependencies
-      setTimeout(() => {
-        addToast('Failed to fetch wallet balance', 'error');
-      }, 0);
+      if (mountedRef.current) {
+        setBalance('Error');
+        setComponentError('Failed to fetch balance');
+        // Use a stable toast error message without including addToast in dependencies
+        setTimeout(() => {
+          if (mountedRef.current) {
+            addToast('Failed to fetch wallet balance', 'error');
+          }
+        }, 0);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.address, suiClient]);
@@ -53,25 +71,41 @@ export default function WalletConnection() {
     if (account?.address && !hasShownConnectToast.current) {
       // Use setTimeout to avoid dependency issues with addToast
       setTimeout(() => {
-        addToast('Wallet connected successfully!', 'success');
+        if (mountedRef.current) {
+          addToast('Wallet connected successfully!', 'success');
+        }
       }, 0);
       hasShownConnectToast.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account?.address]); // Remove addToast from dependencies
 
+  // Cleanup effect to handle component unmounting
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const handleDisconnect = () => {
     disconnect();
     addToast('Wallet disconnected', 'info');
   };
 
-  if (!account) {
+  // Always render the connect button if no account - prevents disappearing button
+  if (!account?.address || !isConnected) {
     return (
       <div className="flex items-center gap-4">
         <div className="text-sm text-gray-600">
           Connect your SUI wallet to view balance
         </div>
-        <ConnectButton />
+        <div className="flex flex-col gap-1">
+          <ConnectButton />
+          {componentError && (
+            <div className="text-xs text-red-500">{componentError}</div>
+          )}
+        </div>
       </div>
     );
   }

@@ -78,43 +78,6 @@ export class SuiJobService {
   }
 
 
-  /**
-   * Format timestamp from milliseconds or ISO string to user's local timezone
-   */
-  private formatTimestamp(timestamp: string | number | null): string {
-    if (!timestamp) return new Date().toISOString();
-    
-    let date: Date;
-    
-    // Handle different timestamp formats
-    if (typeof timestamp === 'string') {
-      if (timestamp.includes('T')) {
-        // ISO string format (assume GMT if no timezone specified)
-        date = new Date(timestamp);
-      } else {
-        // Try parsing as number in string format
-        const numTimestamp = Number(timestamp);
-        if (!isNaN(numTimestamp)) {
-          date = new Date(numTimestamp);
-        } else {
-          // Fallback for other string formats
-          date = new Date(timestamp);
-        }
-      }
-    } else {
-      // Numeric timestamp (milliseconds)
-      date = new Date(Number(timestamp));
-    }
-    
-    // Ensure the date is valid
-    if (isNaN(date.getTime())) {
-      console.error('Invalid timestamp:', timestamp);
-      return new Date().toISOString();
-    }
-    
-    // Return as ISO string (JavaScript Date automatically handles timezone conversion when creating from UTC)
-    return date.toISOString();
-  }
 
   /**
    * Format timestamp for display in user's local timezone
