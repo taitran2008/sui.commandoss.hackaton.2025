@@ -8,7 +8,6 @@ import WalletConnection from '@/components/WalletConnection';
 import WalletBalance from '@/components/WalletBalance';
 import WalletStatus from '@/components/WalletStatus';
 import WalletErrorBoundary from '@/components/WalletErrorBoundary';
-import TransactionHistory from '@/components/TransactionHistory';
 import { useSuiJobs } from '@/hooks/useSuiJobs';
 
 export default function TaskList() {
@@ -197,56 +196,46 @@ export default function TaskList() {
         </div>
 
         {/* Task List */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Show loading overlay when refreshing existing tasks */}
-            {loading && tasks.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                  <span className="text-blue-700 font-medium">Refreshing jobs from blockchain...</span>
-                </div>
+        <div className="space-y-6">
+          {/* Show loading overlay when refreshing existing tasks */}
+          {loading && tasks.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <span className="text-blue-700 font-medium">Refreshing jobs from blockchain...</span>
               </div>
-            )}
-            
-            {sortedTasks.length === 0 ? (
-              <div className="bg-white rounded-lg shadow-md p-12 text-center">
-                <div className="text-gray-400 text-lg mb-2">No jobs found</div>
-                <p className="text-gray-500">
-                  {filter === 'all' 
-                    ? 'No jobs found for your wallet address. Create your first job using the form above or check if you\'re connected to the correct wallet.' 
-                    : `No ${filter} jobs available for your wallet.`
-                  }
-                </p>
-                <button
-                  onClick={refetch}
-                  disabled={loading}
-                  className="mt-4 text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
-                >
-                  Refresh from blockchain
-                </button>
-              </div>
-            ) : (
-              <div className={`space-y-6 ${loading ? 'opacity-70 pointer-events-none' : ''}`}>
-                {sortedTasks.map(task => (
-                  <TaskCard
-                    key={task.uuid}
-                    task={task}
-                    onTaskUpdated={handleTaskUpdated}
-                    onTaskDeleted={handleTaskDeleted}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+            </div>
+          )}
           
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <WalletErrorBoundary>
-              <TransactionHistory />
-            </WalletErrorBoundary>
-          </div>
+          {sortedTasks.length === 0 ? (
+            <div className="bg-white rounded-lg shadow-md p-12 text-center">
+              <div className="text-gray-400 text-lg mb-2">No jobs found</div>
+              <p className="text-gray-500">
+                {filter === 'all' 
+                  ? 'No jobs found for your wallet address. Create your first job using the form above or check if you\'re connected to the correct wallet.' 
+                  : `No ${filter} jobs available for your wallet.`
+                }
+              </p>
+              <button
+                onClick={refetch}
+                disabled={loading}
+                className="mt-4 text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+              >
+                Refresh from blockchain
+              </button>
+            </div>
+          ) : (
+            <div className={`space-y-6 ${loading ? 'opacity-70 pointer-events-none' : ''}`}>
+              {sortedTasks.map(task => (
+                <TaskCard
+                  key={task.uuid}
+                  task={task}
+                  onTaskUpdated={handleTaskUpdated}
+                  onTaskDeleted={handleTaskDeleted}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
