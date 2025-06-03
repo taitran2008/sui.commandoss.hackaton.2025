@@ -11,8 +11,7 @@ interface TaskCardProps {
   onTaskDeleted: (uuid: string) => void;
 }
 
-export default function TaskCard({ task, onTaskUpdated }: TaskCardProps) {
-  const [isUpdating] = useState(false);
+export default function TaskCard({ task }: TaskCardProps) {
 
   // For SUI blockchain jobs, we'll disable direct updates and deletions
   // These would require blockchain transactions
@@ -75,7 +74,7 @@ export default function TaskCard({ task, onTaskUpdated }: TaskCardProps) {
               <span className="font-medium">Duration:</span> {task.estimated_duration}
             </div>
             <div>
-              <span className="font-medium">Reward:</span> {task.reward_amount} SUI
+              <span className="font-medium">Reward:</span> {task.reward_amount}
             </div>
             <div>
               <span className="font-medium">Submitter:</span>{' '}
@@ -106,9 +105,7 @@ export default function TaskCard({ task, onTaskUpdated }: TaskCardProps) {
           </button>
         </div>
         
-        <div className="text-xs text-gray-500">
-          On SUI Blockchain
-        </div>
+
       </div>
     </div>
   );

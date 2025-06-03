@@ -75,12 +75,51 @@ export class SuiJobService {
    */
   private parseJobPayload(description: string): { task: string; fullDescription: string; category: string } {
     try {
+      // More comprehensive cleaning to remove various invisible characters
+      let cleanedDescription = description
+        .trim()                           // Remove leading/trailing whitespace
+        .replace(/^\uFEFF/, '')          // Remove BOM (Byte Order Mark)
+        .replace(/^[\u200B-\u200D\uFEFF\u00A0]+/, '') // Remove zero-width spaces and non-breaking spaces
+        .replace(/^[\x00-\x1F\x7F-\x9F]+/, '')        // Remove control characters
+        .replace(/^\s+/, '');            // Remove any remaining whitespace
+      
+      // Find the first occurrence of '{' and start from there
+      const jsonStart = cleanedDescription.indexOf('{');
+      if (jsonStart > 0) {
+        cleanedDescription = cleanedDescription.substring(jsonStart);
+      }
+      
       // Try to parse as JSON first
-      const parsed = JSON.parse(description);
+      const parsed = JSON.parse(cleanedDescription);
+      
+      // Check if this is a valid JSON structure with expected fields
+      if (typeof parsed === 'object' && parsed !== null) {
+        // Handle both old format (with uuid) and new format
+        const taskName = parsed.task || parsed.title || 'Unknown Task';
+        const category = parsed.category || 'other';
+        
+        // If it has uuid field, it's likely from the old system - extract meaningful data
+        if (parsed.uuid && typeof parsed.task === 'string') {
+          return {
+            task: taskName,
+            fullDescription: parsed.description || description,
+            category: category
+          };
+        }
+        
+        // Otherwise, use the parsed data as-is
+        return {
+          task: taskName,
+          fullDescription: description,
+          category: category
+        };
+      }
+      
+      // If parsed is not an object, treat as plain text
       return {
-        task: parsed.task || parsed.title || description.slice(0, 100),
+        task: description.slice(0, 100),
         fullDescription: description,
-        category: parsed.category || 'other'
+        category: 'other'
       };
     } catch {
       // If not JSON, extract task name from description
@@ -222,20 +261,78 @@ export class SuiJobService {
   ): Task {
     const parsedPayload = this.parseJobPayload(details?.description || event.parsedJson.description || '');
     
-    // Determine urgency based on reward amount or default to standard
+    // Try to parse the description as JSON to extract additional metadata
+    let jsonMetadata: {
+      urgency?: string;
+      estimated_duration?: string;
+      [key: string]: string | number | boolean | null | undefined;
+    } | null = null;
+    try {
+      const rawDescription = details?.description || event.parsedJson.description || '';
+
+      // More comprehensive cleaning to remove various invisible characters
+      let cleanedDescription = rawDescription
+        .trim()                           // Remove leading/trailing whitespace
+        .replace(/^\uFEFF/, '')          // Remove BOM (Byte Order Mark)
+        .replace(/^[\u200B-\u200D\uFEFF\u00A0]+/, '') // Remove zero-width spaces and non-breaking spaces
+        .replace(/^[\x00-\x1F\x7F-\x9F]+/, '')        // Remove control characters
+        .replace(/^\s+/, '');            // Remove any remaining whitespace
+      
+      // Find the first occurrence of '{' and start from there
+      const jsonStart = cleanedDescription.indexOf('{');
+      if (jsonStart > 0) {
+        console.log('Found JSON start at position:', jsonStart);
+        console.log('Characters before JSON:', Array.from(cleanedDescription.slice(0, jsonStart)).map(c => `${c} (${c.charCodeAt(0)})`));
+        cleanedDescription = cleanedDescription.substring(jsonStart);
+      }
+      
+
+      jsonMetadata = JSON.parse(cleanedDescription);
+    } catch (error) {
+      console.error('JSON parsing failed:', error);
+      console.error('Input description:', details?.description || event.parsedJson.description || '');
+      console.error('Error message:', error instanceof Error ? error.message : String(error));
+    }
+    console.log('Parsed JSON metadata:', jsonMetadata);
+    // Determine urgency - prefer JSON metadata, then reward-based calculation
     let urgency: 'low' | 'standard' | 'high' | 'urgent' = 'standard';
-    if (details?.rewardAmount) {
+    if (jsonMetadata?.urgency && 
+        typeof jsonMetadata.urgency === 'string' &&
+        ['low', 'standard', 'high', 'urgent'].includes(jsonMetadata.urgency)) {
+      urgency = jsonMetadata.urgency as 'low' | 'standard' | 'high' | 'urgent';
+    } else if (details?.rewardAmount) {
       if (details.rewardAmount >= 10) urgency = 'urgent';
       else if (details.rewardAmount >= 5) urgency = 'high';
       else if (details.rewardAmount >= 1) urgency = 'standard';
       else urgency = 'low';
     }
 
-    // Estimate duration based on urgency and reward
+    // Estimate duration - prefer JSON metadata, then urgency-based calculation
     let estimatedDuration = '2-4 hours';
-    if (urgency === 'urgent') estimatedDuration = '30min-1hour';
-    else if (urgency === 'high') estimatedDuration = '1-2 hours';
-    else if (urgency === 'low') estimatedDuration = '4-8 hours';
+    if (jsonMetadata?.estimated_duration && typeof jsonMetadata.estimated_duration === 'string') {
+      estimatedDuration = jsonMetadata.estimated_duration;
+    } else {
+      if (urgency === 'urgent') estimatedDuration = '30min-1hour';
+      else if (urgency === 'high') estimatedDuration = '1-2 hours';
+      else if (urgency === 'low') estimatedDuration = '4-8 hours';
+    }
+
+    // Determine reward amount - prefer JSON metadata, then blockchain details
+    let rewardAmount = '0 SUI';
+    if (jsonMetadata?.reward_amount && typeof jsonMetadata.reward_amount === 'string') {
+      rewardAmount = jsonMetadata.reward_amount;
+    } else if (details?.rewardAmount) {
+      rewardAmount = `${details.rewardAmount} SUI`;
+    }
+
+    // Debug logging for reward amount
+    console.log('Debug reward amount:', {
+      jsonMetadata: jsonMetadata,
+      jobId: event.parsedJson.job_id,
+      jsonReward: jsonMetadata?.reward_amount,
+      blockchainReward: details?.rewardAmount,
+      finalReward: rewardAmount
+    });
 
     return {
       uuid: event.parsedJson.job_id,
@@ -246,7 +343,7 @@ export class SuiJobService {
       submitter: event.parsedJson.submitter,
       timestamp: this.formatTimestamp(timestamps?.createdAt || event.timestampMs),
       estimated_duration: estimatedDuration,
-      reward_amount: details?.rewardAmount?.toFixed(4) || '0.0000',
+      reward_amount: rewardAmount,
       completed: details?.status === SuiJobStatus.COMPLETED || details?.status === SuiJobStatus.VERIFIED
     };
   }
