@@ -10,3 +10,4 @@ smart_contracts/tests/smart_contracts_tests.move.bak
 smart_contracts/sources/smart_contracts.move.bak
 smart_contracts/deploy.txt
 queue-monitor/nodejs-test-client/*
+front-end/nodejs-test-client/*
