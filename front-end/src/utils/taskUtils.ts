@@ -4,16 +4,30 @@ import { Task } from '@/types/task';
  * Utility functions for handling tasks with proper UUID management
  */
 
+interface BackendTaskData {
+  uuid?: string;
+  id?: string;
+  task: string;
+  description: string;
+  category: string;
+  urgency: 'low' | 'standard' | 'high' | 'urgent';
+  submitter: string;
+  timestamp: string;
+  estimated_duration: string;
+  reward_amount: string;
+  completed?: boolean;
+}
+
 export const generateTaskUUID = (): string => {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 15);
   return `job-${timestamp}-${randomSuffix}`;
 };
 
-export const parseTaskFromBackend = (backendData: any): Task => {
+export const parseTaskFromBackend = (backendData: BackendTaskData): Task => {
   // Handle the case where backend returns "uuid" as the key
   return {
-    uuid: backendData.uuid || backendData.id,
+    uuid: backendData.uuid || backendData.id || generateTaskUUID(),
     task: backendData.task,
     description: backendData.description,
     category: backendData.category,

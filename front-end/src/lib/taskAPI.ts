@@ -1,5 +1,5 @@
 import { Task } from '@/types/task';
-import { parseTaskFromBackend, formatTaskForBackend, generateTaskUUID } from '@/utils/taskUtils';
+import { generateTaskUUID } from '@/utils/taskUtils';
 import { APP_CONFIG } from '@/config/app';
 
 /**

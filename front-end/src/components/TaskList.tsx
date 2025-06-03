@@ -6,6 +6,11 @@ import TaskCard from '@/components/TaskCard';
 import TaskForm from '@/components/TaskForm';
 import { fetchTasks } from '@/lib/api';
 import { sortTasks, filterTasks, getTaskStats } from '@/utils/taskUtils';
+import WalletConnection from '@/components/WalletConnection';
+import WalletBalance from '@/components/WalletBalance';
+import WalletStatus from '@/components/WalletStatus';
+import WalletErrorBoundary from '@/components/WalletErrorBoundary';
+import TransactionHistory from '@/components/TransactionHistory';
 
 export default function TaskList() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -58,9 +63,24 @@ export default function TaskList() {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">Task Management System</h1>
+            <p className="text-gray-600">Manage your SUI blockchain tasks efficiently</p>
+          </div>
+          <WalletErrorBoundary>
+            <WalletBalance />
+          </WalletErrorBoundary>
+        </div>
+
+        {/* Wallet Connection Section */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Task Management System</h1>
-          <p className="text-gray-600">Manage your SUI blockchain tasks efficiently</p>
+          <WalletErrorBoundary>
+            <div className="flex items-center justify-between">
+              <WalletConnection />
+              <WalletStatus />
+            </div>
+          </WalletErrorBoundary>
         </div>
 
         {/* Stats Dashboard */}
@@ -122,7 +142,7 @@ export default function TaskList() {
               <select
                 id="sort"
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
+                onChange={(e) => setSortBy(e.target.value as 'timestamp' | 'urgency' | 'reward')}
                 className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="timestamp">Date Created</option>
@@ -134,27 +154,37 @@ export default function TaskList() {
         </div>
 
         {/* Task List */}
-        <div className="space-y-6">
-          {sortedTasks.length === 0 ? (
-            <div className="bg-white rounded-lg shadow-md p-12 text-center">
-              <div className="text-gray-400 text-lg mb-2">No tasks found</div>
-              <p className="text-gray-500">
-                {filter === 'all' 
-                  ? 'Create your first task using the form above.' 
-                  : `No ${filter} tasks available.`
-                }
-              </p>
-            </div>
-          ) : (
-            sortedTasks.map(task => (
-              <TaskCard
-                key={task.uuid}
-                task={task}
-                onTaskUpdated={handleTaskUpdated}
-                onTaskDeleted={handleTaskDeleted}
-              />
-            ))
-          )}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Main Content */}
+          <div className="lg:col-span-3 space-y-6">
+            {sortedTasks.length === 0 ? (
+              <div className="bg-white rounded-lg shadow-md p-12 text-center">
+                <div className="text-gray-400 text-lg mb-2">No tasks found</div>
+                <p className="text-gray-500">
+                  {filter === 'all' 
+                    ? 'Create your first task using the form above.' 
+                    : `No ${filter} tasks available.`
+                  }
+                </p>
+              </div>
+            ) : (
+              sortedTasks.map(task => (
+                <TaskCard
+                  key={task.uuid}
+                  task={task}
+                  onTaskUpdated={handleTaskUpdated}
+                  onTaskDeleted={handleTaskDeleted}
+                />
+              ))
+            )}
+          </div>
+          
+          {/* Sidebar */}
+          <div className="lg:col-span-1">
+            <WalletErrorBoundary>
+              <TransactionHistory />
+            </WalletErrorBoundary>
+          </div>
         </div>
       </div>
     </div>

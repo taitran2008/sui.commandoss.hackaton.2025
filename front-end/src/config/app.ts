@@ -32,8 +32,13 @@ export const APP_CONFIG = {
   
   // SUI Blockchain Configuration
   sui: {
-    network: process.env.NEXT_PUBLIC_SUI_NETWORK || 'testnet',
+    network: (process.env.NEXT_PUBLIC_SUI_NETWORK as 'mainnet' | 'testnet' | 'devnet') || 'testnet',
     defaultGasPrice: 1000,
+    rpcUrls: {
+      mainnet: 'https://fullnode.mainnet.sui.io:443',
+      testnet: 'https://fullnode.testnet.sui.io:443',
+      devnet: 'https://fullnode.devnet.sui.io:443',
+    }
   }
 } as const;
 

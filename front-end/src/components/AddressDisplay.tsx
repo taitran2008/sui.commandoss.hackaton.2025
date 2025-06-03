@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { truncateAddress } from '@/utils/suiUtils';
 
 interface AddressDisplayProps {
   address: string;
@@ -14,11 +15,6 @@ export default function AddressDisplay({
   showCopyButton = false 
 }: AddressDisplayProps) {
   const [copied, setCopied] = useState(false);
-
-  const truncateAddress = (addr: string) => {
-    if (addr.length <= 10) return addr;
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
 
   const copyToClipboard = async () => {
     try {

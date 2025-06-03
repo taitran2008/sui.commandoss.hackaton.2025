@@ -18,7 +18,7 @@ export default function TaskCard({ task, onTaskUpdated, onTaskDeleted }: TaskCar
   const handleToggleComplete = async () => {
     setIsUpdating(true);
     try {
-      const updatedTask = await updateTaskStatus(task.uuid, !task.completed);
+      await updateTaskStatus(task.uuid, !task.completed);
       onTaskUpdated({ ...task, completed: !task.completed });
     } catch (error) {
       console.error('Error updating task:', error);
