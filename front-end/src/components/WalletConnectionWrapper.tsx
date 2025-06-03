@@ -21,10 +21,6 @@ export default function WalletConnectionWrapper() {
     setShowFallback(false);
   };
 
-  const handleError = () => {
-    setShowFallback(true);
-  };
-
   // Fallback UI when wallet connection fails
   const FallbackConnectButton = () => (
     <div className="flex items-center gap-4">

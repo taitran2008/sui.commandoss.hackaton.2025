@@ -4,6 +4,7 @@ import { ConnectButton, useCurrentAccount, useDisconnectWallet, useSuiClient } f
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatSuiBalance, truncateAddress } from '@/utils/suiUtils';
 import { useToast } from '@/components/ToastProvider';
+import { SuiNetworkUtils } from '@/utils/suiNetworkUtils';
 
 export default function WalletConnection() {
   const account = useCurrentAccount();
@@ -28,24 +29,42 @@ export default function WalletConnection() {
     setLoading(true);
     setComponentError(null);
     try {
-      const balance = await suiClient.getBalance({
-        owner: account.address,
-      });
+      console.log('🔄 Fetching wallet balance with network resilience...');
+      
+      // Use robust network utilities with retry and fallback
+      const balanceResult = await SuiNetworkUtils.getBalance(
+        suiClient,
+        account.address,
+        'testnet', // TODO: Get from config or context
+        10000 // 10 second timeout
+      );
       
       // Convert from MIST to SUI using utility function
-      const formattedBalance = formatSuiBalance(balance.totalBalance);
+      const formattedBalance = formatSuiBalance(balanceResult.totalBalance);
       if (mountedRef.current) {
         setBalance(formattedBalance);
+        console.log(`✅ Successfully fetched balance: ${formattedBalance} SUI`);
       }
     } catch (error) {
-      console.error('Error fetching balance:', error);
+      console.error('❌ Error fetching balance:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
       if (mountedRef.current) {
-        setBalance('Error');
-        setComponentError('Failed to fetch balance');
+        // Show user-friendly error message based on error type
+        if (errorMessage.toLowerCase().includes('failed to fetch') || 
+            errorMessage.toLowerCase().includes('network') ||
+            errorMessage.toLowerCase().includes('timeout')) {
+          setBalance('Network Error');
+          setComponentError('Network connectivity issue - please check your connection');
+        } else {
+          setBalance('Error');
+          setComponentError('Failed to fetch balance');
+        }
+        
         // Use a stable toast error message without including addToast in dependencies
         setTimeout(() => {
           if (mountedRef.current) {
-            addToast('Failed to fetch wallet balance', 'error');
+            addToast('Failed to fetch wallet balance - retrying automatically...', 'error');
           }
         }, 0);
       }
