@@ -474,6 +474,8 @@ export class TaskAPI {
         throw new Error('Wallet not connected. Please connect your wallet to verify tasks.');
       }
 
+      console.log(`🔍 Starting verification for task ${taskId}...`);
+
       // Use real SUI blockchain API to verify and release payment
       const verifyResult = await suiJobService.verifyAndRelease(taskId, signAndExecuteTransaction);
       
@@ -481,12 +483,16 @@ export class TaskAPI {
         throw new Error(verifyResult.error || 'Failed to verify task on blockchain');
       }
 
-      // After successful verification, fetch updated job details
-      const jobDetails = await suiJobService.getJobDetails(taskId);
+      console.log(`✅ Verification transaction successful for task ${taskId}, fetching updated details...`);
+
+      // After successful verification, fetch updated job details with retry logic
+      const jobDetails = await suiJobService.getJobDetailsAfterVerification(taskId);
       
       if (!jobDetails) {
         throw new Error('Failed to fetch updated job details after verification');
       }
+
+      console.log(`📋 Successfully retrieved verified job details for task ${taskId}`);
 
       // Convert SUI job details to Task format
       const updatedTask: Task = {

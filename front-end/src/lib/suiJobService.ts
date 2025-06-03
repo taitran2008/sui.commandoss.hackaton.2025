@@ -1090,6 +1090,47 @@ export class SuiJobService {
       }
     });
   }
+
+  /**
+   * Get job details with retries specifically for post-verification scenarios
+   * Uses more aggressive retry logic since blockchain state might take time to propagate
+   */
+  async getJobDetailsAfterVerification(jobId: string): Promise<SuiJobDetails | null> {
+    console.log(`⏳ Waiting for verification transaction to be finalized for job ${jobId}...`);
+    // First wait a moment for the transaction to be finalized
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    console.log(`🔄 Attempting to fetch job details with retry logic for job ${jobId}...`);
+    // Use more aggressive retry logic for post-verification queries
+    return await this.retryOperation(async () => {
+      const details = await this.getJobDetails(jobId);
+      if (!details) {
+        console.log(`⚠️ Job details not available yet for ${jobId}, retrying...`);
+        throw new Error('Job details not available yet after verification');
+      }
+      // Verify the job is actually in verified status (status: 3)
+      if (details.status !== 3) {
+        const statusText = this.getJobStatusText(details.status);
+        console.log(`⚠️ Job ${jobId} not yet verified - current status: ${details.status} (${statusText}), retrying...`);
+        throw new Error(`Job not yet verified - current status: ${details.status} (${statusText})`);
+      }
+      console.log(`✅ Successfully retrieved verified job details for ${jobId}`);
+      return details;
+    }, 5, 1000); // 5 retries with 1 second initial delay
+  }
+
+  /**
+   * Get human-readable job status for debugging
+   */
+  private getJobStatusText(status: number): string {
+    switch(status) {
+      case 0: return 'PENDING';
+      case 1: return 'CLAIMED';
+      case 2: return 'COMPLETED';
+      case 3: return 'VERIFIED';
+      default: return `UNKNOWN(${status})`;
+    }
+  }
 }
 
 // Export a singleton instance
