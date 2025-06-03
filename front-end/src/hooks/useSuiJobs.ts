@@ -15,9 +15,10 @@ export interface UseSuiJobsReturn {
   refetch: () => Promise<void>;
   balance: number;
   isConnected: boolean;
+  currentAddress: string | null;
 }
 
-export function useSuiJobs(): UseSuiJobsReturn {
+export function useSuiJobs(hostAddress?: string | null): UseSuiJobsReturn {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,9 +26,13 @@ export function useSuiJobs(): UseSuiJobsReturn {
   
   const currentAccount = useCurrentAccount();
   const isConnected = !!currentAccount;
+  
+  // Use host address if provided, otherwise use connected wallet address
+  const targetAddress = hostAddress || currentAccount?.address;
+  const currentAddress = targetAddress || null;
 
   const fetchJobs = useCallback(async () => {
-    if (!currentAccount?.address) {
+    if (!targetAddress) {
       setTasks([]);
       setBalance(0);
       return;
@@ -39,8 +44,8 @@ export function useSuiJobs(): UseSuiJobsReturn {
     try {
       // Fetch both jobs and balance in parallel
       const [jobTasks, walletBalance] = await Promise.all([
-        suiJobService.fetchJobsForWallet(currentAccount.address),
-        suiJobService.getSuiBalance(currentAccount.address)
+        suiJobService.fetchJobsForWallet(targetAddress),
+        suiJobService.getSuiBalance(targetAddress)
       ]);
 
       setTasks(jobTasks);
@@ -52,20 +57,20 @@ export function useSuiJobs(): UseSuiJobsReturn {
     } finally {
       setLoading(false);
     }
-  }, [currentAccount?.address]);
+  }, [targetAddress]);
 
   // Fetch jobs when wallet connects/disconnects
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
 
-  // Auto-refresh jobs every 30 seconds when connected
+  // Auto-refresh jobs every 30 seconds when we have a target address
   useEffect(() => {
-    if (!isConnected) return;
+    if (!targetAddress) return;
 
     const interval = setInterval(fetchJobs, 30000);
     return () => clearInterval(interval);
-  }, [isConnected, fetchJobs]);
+  }, [targetAddress, fetchJobs]);
 
   return {
     tasks,
@@ -73,6 +78,7 @@ export function useSuiJobs(): UseSuiJobsReturn {
     error,
     refetch: fetchJobs,
     balance,
-    isConnected
+    isConnected,
+    currentAddress
   };
 }

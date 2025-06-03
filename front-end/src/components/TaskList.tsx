@@ -10,12 +10,16 @@ import WalletStatus from '@/components/WalletStatus';
 import WalletErrorBoundary from '@/components/WalletErrorBoundary';
 import { useSuiJobs } from '@/hooks/useSuiJobs';
 
-export default function TaskList() {
+interface TaskListProps {
+  hostAddress?: string | null;
+}
+
+export default function TaskList({ hostAddress }: TaskListProps) {
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
   const [sortBy, setSortBy] = useState<'timestamp' | 'urgency' | 'reward'>('timestamp');
   
-  // Use SUI jobs hook instead of local state and API calls
-  const { tasks, loading, error, refetch, isConnected } = useSuiJobs();
+  // Use SUI jobs hook with optional host address
+  const { tasks, loading, error, refetch, isConnected } = useSuiJobs(hostAddress);
 
   const handleTaskCreated = () => {
     // When a task is created, refresh the jobs from blockchain
@@ -37,8 +41,8 @@ export default function TaskList() {
 
   const stats = getTaskStats(tasks);
 
-  // Show wallet connection prompt if not connected
-  if (!isConnected) {
+  // Show wallet connection prompt if not connected and no host address provided
+  if (!isConnected && !hostAddress) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="max-w-md mx-auto text-center p-8 bg-white rounded-lg shadow-md">
@@ -93,9 +97,19 @@ export default function TaskList() {
             <h1 className="text-4xl font-bold text-gray-900 mb-2">
               SUI Job Management System
             </h1>
-            <p className="text-gray-600">
-              Manage your SUI blockchain jobs efficiently • Connected to SUI Testnet
-            </p>
+            <div className="space-y-1">
+              <p className="text-gray-600">
+                {hostAddress 
+                  ? `Viewing jobs for: ${hostAddress.slice(0, 6)}...${hostAddress.slice(-4)}`
+                  : "Manage your SUI blockchain jobs efficiently"
+                } • Connected to SUI Testnet
+              </p>
+              {hostAddress && (
+                <p className="text-sm text-blue-600">
+                  📍 Read-only view via URL parameter. Connect your wallet to manage jobs.
+                </p>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <button
@@ -114,15 +128,36 @@ export default function TaskList() {
           </div>
         </div>
 
-        {/* Wallet Connection Section */}
-        <div className="mb-8">
-          <WalletErrorBoundary>
-            <div className="flex items-center justify-between">
-              <WalletConnection />
-              <WalletStatus />
+        {/* Wallet Connection Section - only show when not using host address */}
+        {!hostAddress && (
+          <div className="mb-8">
+            <WalletErrorBoundary>
+              <div className="flex items-center justify-between">
+                <WalletConnection />
+                <WalletStatus />
+              </div>
+            </WalletErrorBoundary>
+          </div>
+        )}
+
+        {/* Host Address Info - show when using host address */}
+        {hostAddress && (
+          <div className="mb-8">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                <div>
+                  <div className="text-sm font-medium text-blue-900">
+                    Viewing jobs for address: <span className="font-mono">{hostAddress}</span>
+                  </div>
+                  <div className="text-xs text-blue-700 mt-1">
+                    This is a read-only view. To create or manage jobs, connect your wallet.
+                  </div>
+                </div>
+              </div>
             </div>
-          </WalletErrorBoundary>
-        </div>
+          </div>
+        )}
 
         {/* Stats Dashboard */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -144,8 +179,10 @@ export default function TaskList() {
           </div>
         </div>
 
-
-        <TaskForm onTaskCreated={handleTaskCreated} />
+        {/* Task Creation Form - only show when not using host address */}
+        {!hostAddress && (
+          <TaskForm onTaskCreated={handleTaskCreated} />
+        )}
 
         {/* Filters and Sorting */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-6">
@@ -211,9 +248,11 @@ export default function TaskList() {
             <div className="bg-white rounded-lg shadow-md p-12 text-center">
               <div className="text-gray-400 text-lg mb-2">No jobs found</div>
               <p className="text-gray-500">
-                {filter === 'all' 
-                  ? 'No jobs found for your wallet address. Create your first job using the form above or check if you\'re connected to the correct wallet.' 
-                  : `No ${filter} jobs available for your wallet.`
+                {hostAddress 
+                  ? `No jobs found for address ${hostAddress.slice(0, 6)}...${hostAddress.slice(-4)}. This address may not have submitted any jobs yet.`
+                  : filter === 'all' 
+                    ? 'No jobs found for your wallet address. Create your first job using the form above or check if you\'re connected to the correct wallet.' 
+                    : `No ${filter} jobs available for your wallet.`
                 }
               </p>
               <button
@@ -232,6 +271,8 @@ export default function TaskList() {
                   task={task}
                   onTaskUpdated={handleTaskUpdated}
                   onTaskDeleted={handleTaskDeleted}
+                  onJobRefresh={refetch}
+                  readOnly={!!hostAddress}
                 />
               ))}
             </div>

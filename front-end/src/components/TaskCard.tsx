@@ -13,9 +13,10 @@ interface TaskCardProps {
   onTaskUpdated?: (task: Task) => void;
   onTaskDeleted: (uuid: string) => void;
   onJobRefresh?: () => void;
+  readOnly?: boolean;
 }
 
-export default function TaskCard({ task, onTaskDeleted, onJobRefresh }: TaskCardProps) {
+export default function TaskCard({ task, onTaskDeleted, onJobRefresh, readOnly = false }: TaskCardProps) {
   const account = useCurrentAccount();
   const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
   const { addToast } = useToast();
@@ -157,7 +158,7 @@ export default function TaskCard({ task, onTaskDeleted, onJobRefresh }: TaskCard
             View on Explorer
           </button>
           
-          {canDelete && (
+          {!readOnly && canDelete && (
             <button
               onClick={handleDeleteJob}
               disabled={isDeleting || task.completed}
@@ -187,13 +188,24 @@ export default function TaskCard({ task, onTaskDeleted, onJobRefresh }: TaskCard
         )}
       </div>
 
-      {/* Job Management Panel - always visible */}
-      <div className="mt-4">
-        <JobManagementPanel 
-          task={task} 
-          onTaskUpdated={() => onJobRefresh?.()} 
-        />
-      </div>
+      {/* Job Management Panel - only show when not in read-only mode */}
+      {!readOnly && (
+        <div className="mt-4">
+          <JobManagementPanel 
+            task={task} 
+            onTaskUpdated={() => onJobRefresh?.()} 
+          />
+        </div>
+      )}
+      
+      {/* Read-only mode info */}
+      {readOnly && (
+        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="text-sm text-blue-700">
+            <span className="font-medium">👀 Read-only view:</span> Connect your wallet to manage jobs and interact with the blockchain.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
