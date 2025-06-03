@@ -20,11 +20,34 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
   const [activeOperation, setActiveOperation] = useState<string>('');
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [isJobDeleted, setIsJobDeleted] = useState(false);
+
+  // Check if job has been deleted from blockchain
+  const checkIfJobDeleted = async () => {
+    if (task.description === 'This job has been deleted from the blockchain') {
+      setIsJobDeleted(true);
+      return;
+    }
+    
+    try {
+      const jobDetails = await suiJobService.getJobDetails(task.uuid);
+      setIsJobDeleted(jobDetails === null);
+    } catch (error) {
+      console.error('Error checking job status:', error);
+      setIsJobDeleted(false);
+    }
+  };
+
+  // Check job status on component mount and when task changes
+  useState(() => {
+    checkIfJobDeleted();
+  });
 
   // Check user permissions
   const isSubmitter = account?.address === task.submitter;
-  const canClaim = !isSubmitter && account?.address;
-  const canReject = isSubmitter && task.completed && !task.completed; // Assuming completed jobs can be rejected
+  const canClaim = !isSubmitter && account?.address && !isJobDeleted;
+  const canReject = isSubmitter && task.completed && !task.completed && !isJobDeleted; // Assuming completed jobs can be rejected
+  const canVerifyAndRelease = isSubmitter && task.completed && !isJobDeleted;
 
   const handleOperation = async (
     operation: string,
@@ -103,7 +126,7 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
     const buttons = [];
 
     // Claim job button (for workers)
-    if (canClaim && !task.completed) {
+    if (canClaim && !task.completed && !isJobDeleted) {
       buttons.push(
         <button
           key="claim"
@@ -124,7 +147,7 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
     }
 
     // Complete job button (for the worker who claimed it)
-    if (!isSubmitter && task.completed === false) {
+    if (!isSubmitter && task.completed === false && !isJobDeleted) {
       buttons.push(
         <button
           key="complete"
@@ -144,8 +167,8 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
       );
     }
 
-    // Verify & Release button (for job submitter)
-    if (isSubmitter && task.completed) {
+    // Verify & Release button (for job submitter) - only show if job still exists on blockchain
+    if (canVerifyAndRelease) {
       buttons.push(
         <button
           key="verify"

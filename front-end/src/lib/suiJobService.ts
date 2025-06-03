@@ -393,7 +393,6 @@ export class SuiJobService {
     timestamps: SuiJobTimestamps | null
   ): Task {
     const parsedPayload = this.parseJobPayload(details?.description || event.parsedJson.description || '');
-    
     // Try to parse the description as JSON to extract additional metadata
     let jsonMetadata: {
       urgency?: string;

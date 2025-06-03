@@ -85,7 +85,12 @@ export class TaskAPI {
     taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
     walletInfo: WalletInfo
   ): Promise<Task> {
-    // Create job description similar to JobSubmissionForm
+    // Generate UUID matching your expected format: job-{timestamp}-{random}
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(2, 15);
+    const taskUuid = `job-${timestamp}-${randomId}`;
+    
+    // Create job description with embedded JSON metadata
     const jobDescription = this.createJobDescription(taskData);
     
     // Parse reward amount (remove "SUI" suffix if present)
@@ -100,6 +105,7 @@ export class TaskAPI {
     const timeoutMinutes = this.parseEstimatedDurationToMinutes(taskData.estimated_duration);
 
     console.log('🔗 Submitting task to SUI blockchain:', {
+      uuid: taskUuid,
       description: jobDescription,
       rewardAmount,
       timeoutMinutes,
@@ -118,10 +124,10 @@ export class TaskAPI {
       throw new Error(result.error || 'Failed to submit job to blockchain');
     }
 
-    // Create the task object with blockchain job ID as UUID
+    // Create the task object with blockchain job ID as UUID (or use generated UUID if no job ID)
     const newTask: Task = {
       ...taskData,
-      uuid: result.jobId || generateTaskUUID(),
+      uuid: result.jobId || taskUuid,
       timestamp: new Date().toISOString(),
       submitter: walletInfo.address,
       completed: false
@@ -132,7 +138,8 @@ export class TaskAPI {
       jobId: result.jobId,
       submitter: newTask.submitter,
       task: newTask.task,
-      rewardAmount: newTask.reward_amount
+      rewardAmount: newTask.reward_amount,
+      metadata: jobDescription
     });
     return newTask;
   }
@@ -157,13 +164,24 @@ export class TaskAPI {
   }
 
   /**
-   * Create job description similar to JobSubmissionForm
+   * Create job description with embedded JSON metadata for blockchain storage
+   * This ensures the complete task schema is preserved when fetching from blockchain
    */
   private createJobDescription(taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>): string {
-    const urgencyEmoji = this.getUrgencyEmoji(taskData.urgency);
-    const categoryEmoji = this.getCategoryEmoji(taskData.category);
+    // Create the complete JSON metadata matching your desired schema
+    const jsonMetadata = {
+      task: taskData.task,
+      description: taskData.description,
+      category: taskData.category,
+      urgency: taskData.urgency,
+      estimated_duration: taskData.estimated_duration,
+      reward_amount: taskData.reward_amount,
+      timestamp: new Date().toISOString() // GMT timestamp
+    };
     
-    return `${urgencyEmoji} ${taskData.task}\n\n${categoryEmoji} Category: ${taskData.category}\n📝 ${taskData.description}\n⏱️ Duration: ${taskData.estimated_duration}\n💰 Reward: ${taskData.reward_amount}`;
+    // Store JSON metadata as the description for blockchain
+    // This ensures when fetchJobsForWallet runs, it can parse the complete structure
+    return JSON.stringify(jsonMetadata);
   }
 
   /**
