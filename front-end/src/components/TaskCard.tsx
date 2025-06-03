@@ -22,10 +22,6 @@ export default function TaskCard({ task, onTaskUpdated }: TaskCardProps) {
     window.open(explorerUrl, '_blank');
   };
 
-  const handleRefresh = () => {
-    // Trigger a refresh of job data from blockchain
-    onTaskUpdated(task);
-  };
 
   const getUrgencyColor = (urgency: string) => {
     switch (urgency) {
@@ -100,13 +96,7 @@ export default function TaskCard({ task, onTaskUpdated }: TaskCardProps) {
 
       <div className="flex justify-between items-center pt-4 border-t border-gray-200">
         <div className="flex gap-2">
-          <button
-            onClick={handleRefresh}
-            disabled={isUpdating}
-            className="px-3 py-2 rounded-md text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isUpdating ? 'Refreshing...' : 'Refresh'}
-          </button>
+      
           
           <button
             onClick={handleViewOnExplorer}
