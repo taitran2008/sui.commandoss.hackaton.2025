@@ -185,7 +185,7 @@ export class SuiNetworkUtils {
         latency,
         endpoint: 'primary'
       };
-    } catch (error) {
+    } catch {
       console.warn('Primary endpoint health check failed, testing fallback...');
       
       try {
@@ -207,7 +207,7 @@ export class SuiNetworkUtils {
           latency,
           endpoint: 'fallback'
         };
-      } catch (fallbackError) {
+      } catch {
         return {
           healthy: false,
           latency: -1

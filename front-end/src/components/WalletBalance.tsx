@@ -69,7 +69,7 @@ export default function WalletBalance() {
       setBalance('0');
       setRetryCount(0); // Reset retry count when account changes
     }
-  }, [account?.address, fetchBalance]);
+  }, [account?.address, fetchBalance, retryCount]);
 
   // Manual retry function for user-triggered retries
   const handleRetry = useCallback(() => {

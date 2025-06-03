@@ -67,7 +67,7 @@ export default function WalletStatus() {
       setNetworkInfo({ isConnected: false });
       setRetryCount(0);
     }
-  }, [account?.address, checkNetworkConnection]);
+  }, [account?.address, checkNetworkConnection, retryCount]);
 
   const handleRetry = useCallback(() => {
     console.log('🔄 Manual network status retry triggered by user');
