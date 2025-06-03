@@ -9,8 +9,9 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "type-check": "tsc --noEmit",
-    "export": "next build && next export",
-    "preview": "next build && next start"
+    "export": "next build",
+    "preview": "npx serve@latest out",
+    "analyze": "ANALYZE=true npm run build"
   },
   "dependencies": {
     "@mysten/dapp-kit": "^0.16.6",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.3.3",
+    "serve": "^14.2.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
