@@ -13,15 +13,15 @@ export const SUI_CONTRACT_CONFIG = {
   networks: {
     mainnet: {
       rpcUrl: 'https://fullnode.mainnet.sui.io:443',
-      explorerUrl: 'https://suiexplorer.com',
+      explorerUrl: 'https://suiscan.xyz/',
     },
     testnet: {
       rpcUrl: 'https://fullnode.testnet.sui.io:443',
-      explorerUrl: 'https://suiexplorer.com',
+      explorerUrl: 'https://suiscan.xyz/',
     },
     devnet: {
       rpcUrl: 'https://fullnode.devnet.sui.io:443',
-      explorerUrl: 'https://suiexplorer.com',
+      explorerUrl: 'https://suiscan.xyz/',
     },
   },
   

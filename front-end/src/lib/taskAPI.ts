@@ -61,7 +61,7 @@ export class TaskAPI {
    * Create a new task - now integrated with SUI blockchain
    */
   async createTask(
-    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
+    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed' | 'status'>,
     walletInfo?: WalletInfo
   ): Promise<Task> {
     try {
@@ -82,7 +82,7 @@ export class TaskAPI {
    * Create a task on SUI blockchain
    */
   private async createSuiTask(
-    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
+    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed' | 'status'>,
     walletInfo: WalletInfo
   ): Promise<Task> {
     // Generate UUID matching your expected format: job-{timestamp}-{random}
@@ -130,6 +130,7 @@ export class TaskAPI {
       uuid: result.jobId || taskUuid,
       timestamp: new Date().toISOString(),
       submitter: walletInfo.address,
+      status: 0, // PENDING
       completed: false
     };
 
@@ -148,13 +149,14 @@ export class TaskAPI {
    * Create a mock task (fallback when wallet not connected)
    */
   private async createMockTask(
-    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>
+    taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed' | 'status'>
   ): Promise<Task> {
     const newTask: Task = {
       ...taskData,
       uuid: generateTaskUUID(),
       timestamp: new Date().toISOString(),
       submitter: this.generateMockWalletAddress(),
+      status: 0, // PENDING
       completed: false
     };
 
@@ -167,7 +169,7 @@ export class TaskAPI {
    * Create job description with embedded JSON metadata for blockchain storage
    * This ensures the complete task schema is preserved when fetching from blockchain
    */
-  private createJobDescription(taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>): string {
+  private createJobDescription(taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed' | 'status'>): string {
     // Create the complete JSON metadata matching your desired schema
     const jsonMetadata = {
       task: taskData.task,
@@ -265,6 +267,7 @@ export class TaskAPI {
         timestamp: new Date().toISOString(),
         estimated_duration: "0 minutes",
         reward_amount: "0 SUI",
+        status: completed ? 3 : 0, // VERIFIED if completed, PENDING if not
         completed
       };
 
@@ -326,29 +329,233 @@ export class TaskAPI {
   }
 
   /**
-   * Get task statistics
+   * Get task statistics - updated to use status-based calculations
    */
   async getTaskStats(): Promise<{
     total: number;
     completed: number;
     active: number;
+    pending: number;
+    claimed: number;
+    awaitingVerification: number;
     totalReward: number;
     avgCompletionTime?: number;
   }> {
     try {
       const tasks = await this.getAllTasks();
       const total = tasks.length;
-      const completed = tasks.filter(task => task.completed).length;
-      const active = total - completed;
+      
+      // Use status-based calculations instead of legacy completed field
+      const completed = tasks.filter(task => task.status === 3).length; // VERIFIED
+      const active = tasks.filter(task => task.status < 3).length; // PENDING, CLAIMED, COMPLETED
+      const pending = tasks.filter(task => task.status === 0).length; // PENDING
+      const claimed = tasks.filter(task => task.status === 1).length; // CLAIMED
+      const awaitingVerification = tasks.filter(task => task.status === 2).length; // COMPLETED
+      
       const totalReward = tasks.reduce((sum, task) => {
         const amount = parseFloat(task.reward_amount.replace(/[^\d.]/g, ''));
         return sum + (isNaN(amount) ? 0 : amount);
       }, 0);
 
-      return { total, completed, active, totalReward };
+      return { 
+        total, 
+        completed, 
+        active, 
+        pending, 
+        claimed, 
+        awaitingVerification, 
+        totalReward 
+      };
     } catch (error) {
       console.error('Error fetching task stats:', error);
       throw new Error('Failed to fetch task statistics');
+    }
+  }
+
+  /**
+   * Claim a task (PENDING -> CLAIMED)
+   */
+  async claimTask(taskId: string, workerAddress: string, signAndExecuteTransaction?: SignAndExecuteTransactionFunction): Promise<Task> {
+    try {
+      if (!signAndExecuteTransaction) {
+        throw new Error('Wallet not connected. Please connect your wallet to claim tasks.');
+      }
+
+      // Use real SUI blockchain API to claim the job
+      const result = await suiJobService.claimJob(taskId, signAndExecuteTransaction);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to claim task on blockchain');
+      }
+
+      // After successful claim, fetch updated job details
+      const jobDetails = await suiJobService.getJobDetails(taskId);
+      
+      if (!jobDetails) {
+        throw new Error('Failed to fetch updated job details after claim');
+      }
+
+      // Convert SUI job details to Task format
+      const updatedTask: Task = {
+        uuid: taskId,
+        task: this.parseTaskTypeFromDescription(jobDetails.description),
+        description: this.parseDescriptionFromJobDescription(jobDetails.description),
+        category: this.parseCategoryFromDescription(jobDetails.description),
+        urgency: "standard", // Default urgency since not stored on chain
+        submitter: jobDetails.submitter,
+        timestamp: new Date().toISOString(),
+        estimated_duration: "30 minutes", // Default since not stored on chain
+        reward_amount: `${jobDetails.rewardAmount} SUI`,
+        status: 1, // CLAIMED
+        worker: workerAddress,
+        completed: false
+      };
+      
+      return updatedTask;
+    } catch (error) {
+      console.error('Error claiming task:', error);
+      throw new Error('Failed to claim task');
+    }
+  }
+
+  /**
+   * Complete a task (CLAIMED -> COMPLETED)
+   */
+  async completeTask(taskId: string, workerAddress: string, result: string, signAndExecuteTransaction?: SignAndExecuteTransactionFunction): Promise<Task> {
+    try {
+      if (!signAndExecuteTransaction) {
+        throw new Error('Wallet not connected. Please connect your wallet to complete tasks.');
+      }
+
+      // Use real SUI blockchain API to complete the job
+      const completeResult = await suiJobService.completeJob(taskId, signAndExecuteTransaction);
+      
+      if (!completeResult.success) {
+        throw new Error(completeResult.error || 'Failed to complete task on blockchain');
+      }
+
+      // After successful completion, fetch updated job details
+      const jobDetails = await suiJobService.getJobDetails(taskId);
+      
+      if (!jobDetails) {
+        throw new Error('Failed to fetch updated job details after completion');
+      }
+
+      // Convert SUI job details to Task format
+      const updatedTask: Task = {
+        uuid: taskId,
+        task: this.parseTaskTypeFromDescription(jobDetails.description),
+        description: this.parseDescriptionFromJobDescription(jobDetails.description),
+        category: this.parseCategoryFromDescription(jobDetails.description),
+        urgency: "standard", // Default urgency since not stored on chain
+        submitter: jobDetails.submitter,
+        timestamp: new Date().toISOString(),
+        estimated_duration: "30 minutes", // Default since not stored on chain
+        reward_amount: `${jobDetails.rewardAmount} SUI`,
+        status: 2, // COMPLETED
+        worker: workerAddress,
+        result: result,
+        completed: true
+      };
+      
+      return updatedTask;
+    } catch (error) {
+      console.error('Error completing task:', error);
+      throw new Error('Failed to complete task');
+    }
+  }
+
+  /**
+   * Verify a task (COMPLETED -> VERIFIED)
+   */
+  async verifyTask(taskId: string, submitterAddress: string, signAndExecuteTransaction?: SignAndExecuteTransactionFunction): Promise<Task> {
+    try {
+      if (!signAndExecuteTransaction) {
+        throw new Error('Wallet not connected. Please connect your wallet to verify tasks.');
+      }
+
+      // Use real SUI blockchain API to verify and release payment
+      const verifyResult = await suiJobService.verifyAndRelease(taskId, signAndExecuteTransaction);
+      
+      if (!verifyResult.success) {
+        throw new Error(verifyResult.error || 'Failed to verify task on blockchain');
+      }
+
+      // After successful verification, fetch updated job details
+      const jobDetails = await suiJobService.getJobDetails(taskId);
+      
+      if (!jobDetails) {
+        throw new Error('Failed to fetch updated job details after verification');
+      }
+
+      // Convert SUI job details to Task format
+      const updatedTask: Task = {
+        uuid: taskId,
+        task: this.parseTaskTypeFromDescription(jobDetails.description),
+        description: this.parseDescriptionFromJobDescription(jobDetails.description),
+        category: this.parseCategoryFromDescription(jobDetails.description),
+        urgency: "standard", // Default urgency since not stored on chain
+        submitter: submitterAddress,
+        timestamp: new Date().toISOString(),
+        estimated_duration: "30 minutes", // Default since not stored on chain
+        reward_amount: `${jobDetails.rewardAmount} SUI`,
+        status: 3, // VERIFIED
+        worker: jobDetails.worker || undefined,
+        result: jobDetails.result || undefined,
+        completed: true
+      };
+      
+      return updatedTask;
+    } catch (error) {
+      console.error('Error verifying task:', error);
+      throw new Error('Failed to verify task');
+    }
+  }
+
+  /**
+   * Reject a task (COMPLETED -> PENDING)
+   */
+  async rejectTask(taskId: string, submitterAddress: string, reason?: string, signAndExecuteTransaction?: SignAndExecuteTransactionFunction): Promise<Task> {
+    try {
+      if (!signAndExecuteTransaction) {
+        throw new Error('Wallet not connected. Please connect your wallet to reject tasks.');
+      }
+
+      // Use real SUI blockchain API to reject the job
+      const rejectResult = await suiJobService.rejectJob(taskId, reason || 'Work quality does not meet requirements', signAndExecuteTransaction);
+      
+      if (!rejectResult.success) {
+        throw new Error(rejectResult.error || 'Failed to reject task on blockchain');
+      }
+
+      // After successful rejection, fetch updated job details
+      const jobDetails = await suiJobService.getJobDetails(taskId);
+      
+      if (!jobDetails) {
+        throw new Error('Failed to fetch updated job details after rejection');
+      }
+
+      // Convert SUI job details to Task format
+      const updatedTask: Task = {
+        uuid: taskId,
+        task: this.parseTaskTypeFromDescription(jobDetails.description),
+        description: this.parseDescriptionFromJobDescription(jobDetails.description),
+        category: this.parseCategoryFromDescription(jobDetails.description),
+        urgency: "standard", // Default urgency since not stored on chain
+        submitter: submitterAddress,
+        timestamp: new Date().toISOString(),
+        estimated_duration: "30 minutes", // Default since not stored on chain
+        reward_amount: `${jobDetails.rewardAmount} SUI`,
+        status: 0, // PENDING (back to available)
+        worker: undefined, // Clear worker assignment
+        result: undefined, // Clear previous result
+        completed: false
+      };
+      
+      return updatedTask;
+    } catch (error) {
+      console.error('Error rejecting task:', error);
+      throw new Error('Failed to reject task');
     }
   }
 
@@ -367,6 +574,7 @@ export class TaskAPI {
         timestamp: "2025-06-01T07:25:54.972Z",
         estimated_duration: "30 minutes",
         reward_amount: "0.1 SUI",
+        status: 0, // PENDING
         completed: false
       },
       {
@@ -379,6 +587,8 @@ export class TaskAPI {
         timestamp: "2025-06-02T09:15:30.123Z",
         estimated_duration: "45 minutes",
         reward_amount: "0.2 SUI",
+        status: 1, // CLAIMED
+        worker: "0x1234567890abcdef1234567890abcdef12345678",
         completed: false
       },
       {
@@ -391,6 +601,9 @@ export class TaskAPI {
         timestamp: "2025-06-01T14:20:15.456Z",
         estimated_duration: "60 minutes",
         reward_amount: "0.15 SUI",
+        status: 2, // COMPLETED
+        worker: "0xabcdef1234567890abcdef1234567890abcdef12",
+        result: "I have reviewed all 5 blog posts. Post #1 needs minor grammar fixes, Post #2-4 are approved for publication, Post #5 needs content restructuring. All posts follow brand guidelines.",
         completed: true
       },
       {
@@ -403,7 +616,10 @@ export class TaskAPI {
         timestamp: "2025-06-03T11:30:45.789Z",
         estimated_duration: "2 hours",
         reward_amount: "1.5 SUI",
-        completed: false
+        status: 3, // VERIFIED
+        worker: "0xfedcba0987654321fedcba0987654321fedcba09",
+        result: "Smart contract audit completed. Found 2 medium-risk vulnerabilities and 3 low-risk issues. All have been documented with recommendations.",
+        completed: true
       }
     ];
   }
@@ -425,6 +641,62 @@ export class TaskAPI {
    */
   private simulateDelay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Parse task type from job description
+   */
+  private parseTaskTypeFromDescription(description: string): string {
+    try {
+      const parsed = JSON.parse(description);
+      return parsed.task || 'unknown';
+    } catch {
+      // If not JSON, try to extract task type from description
+      if (description.toLowerCase().includes('translat')) return 'translation';
+      if (description.toLowerCase().includes('data')) return 'data-entry';
+      if (description.toLowerCase().includes('review')) return 'content-review';
+      if (description.toLowerCase().includes('audit')) return 'smart-contract-audit';
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Parse description from job description (remove JSON metadata if present)
+   */
+  private parseDescriptionFromJobDescription(description: string): string {
+    try {
+      const parsed = JSON.parse(description);
+      return parsed.description || parsed.text || description;
+    } catch {
+      return description;
+    }
+  }
+
+  /**
+   * Parse category from job description
+   */
+  private parseCategoryFromDescription(description: string): string {
+    try {
+      const parsed = JSON.parse(description);
+      return parsed.category || this.inferCategoryFromTask(parsed.task || description);
+    } catch {
+      return this.inferCategoryFromTask(description);
+    }
+  }
+
+  /**
+   * Infer category from task type or description
+   */
+  private inferCategoryFromTask(taskOrDescription: string): string {
+    const text = taskOrDescription.toLowerCase();
+    if (text.includes('translat')) return 'language';
+    if (text.includes('data') || text.includes('entry')) return 'admin';
+    if (text.includes('review') || text.includes('content')) return 'content';
+    if (text.includes('audit') || text.includes('contract') || text.includes('security')) return 'development';
+    if (text.includes('design') || text.includes('ui') || text.includes('ux')) return 'design';
+    if (text.includes('research')) return 'research';
+    if (text.includes('marketing')) return 'marketing';
+    return 'other';
   }
 }
 

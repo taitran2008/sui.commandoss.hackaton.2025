@@ -9,7 +9,7 @@
 
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
-import { Task } from '@/types/task';
+import { Task, TASK_STATUS } from '@/types/task';
 import { SUI_CONTRACT_CONFIG, SuiNetwork } from '@/config/sui';
 
 // Type for the signAndExecuteTransaction function from @mysten/dapp-kit
@@ -241,10 +241,12 @@ export class SuiJobService {
    */
   private async objectExists(objectId: string): Promise<boolean> {
     try {
-      const object = await this.client.getObject({
-        id: objectId,
-        options: { showType: true }
-      });
+      const object = await this.retryOperation(async () => {
+        return await this.client.getObject({
+          id: objectId,
+          options: { showType: true }
+        });
+      }, 2, 300); // Quick retry for existence checks
       return object.data !== null && object.error === undefined;
     } catch {
       return false;
@@ -269,10 +271,12 @@ export class SuiJobService {
         arguments: [txb.object(jobId)],
       });
 
-      const result = await this.client.devInspectTransactionBlock({
-        transactionBlock: txb,
-        sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      });
+      const result = await this.retryOperation(async () => {
+        return await this.client.devInspectTransactionBlock({
+          transactionBlock: txb,
+          sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        });
+      }, 2, 500); // Shorter retry for devInspect calls
 
       if (result.results && result.results[0] && result.results[0].returnValues) {
         const returnValues = result.results[0].returnValues;
@@ -327,10 +331,12 @@ export class SuiJobService {
         arguments: [txb.object(jobId)],
       });
 
-      const result = await this.client.devInspectTransactionBlock({
-        transactionBlock: txb,
-        sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      });
+      const result = await this.retryOperation(async () => {
+        return await this.client.devInspectTransactionBlock({
+          transactionBlock: txb,
+          sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        });
+      }, 2, 500); // Shorter retry for devInspect calls
 
       if (result.results && result.results[0] && result.results[0].returnValues) {
         const returnValues = result.results[0].returnValues;
@@ -362,33 +368,144 @@ export class SuiJobService {
   }
 
   /**
-   * Query for JobSubmitted events by wallet address
+   * Retry wrapper with exponential backoff for network requests
+   */
+  private async retryOperation<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    initialDelay: number = 1000
+  ): Promise<T> {
+    let lastError: Error;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error as Error;
+        const errorMessage = lastError.message.toLowerCase();
+        
+        // Check if it's a network/fetch error that we should retry
+        const isRetryableError = errorMessage.includes('failed to fetch') ||
+                                errorMessage.includes('network error') ||
+                                errorMessage.includes('timeout') ||
+                                errorMessage.includes('429') ||
+                                errorMessage.includes('too many requests') ||
+                                errorMessage.includes('connection') ||
+                                errorMessage.includes('fetch') ||
+                                errorMessage.includes('network') ||
+                                errorMessage.includes('econnreset') ||
+                                errorMessage.includes('enotfound');
+        
+        if (!isRetryableError || attempt === maxRetries) {
+          throw lastError;
+        }
+        
+        // Exponential backoff with jitter
+        const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
+        console.warn(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`, errorMessage);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError!;
+  }
+
+  /**
+   * Query for JobSubmitted events by wallet address with robust error handling
    */
   async getJobsSubmittedByAddress(walletAddress: string): Promise<SuiJobEvent[]> {
     try {
-      // Query for JobSubmitted events
-      const events = await this.client.queryEvents({
-        query: {
-          MoveEventType: `${PACKAGE_ID}::job_queue::JobSubmitted`
-        },
-        limit: SUI_CONTRACT_CONFIG.defaults.QUERY_LIMIT,
-        order: 'descending'
+      console.log(`Querying JobSubmitted events for address: ${walletAddress}`);
+      
+      // Use retry wrapper for the network request
+      const events = await this.retryOperation(async () => {
+        return await this.client.queryEvents({
+          query: {
+            MoveEventType: `${PACKAGE_ID}::job_queue::JobSubmitted`
+          },
+          limit: Math.min(SUI_CONTRACT_CONFIG.defaults.QUERY_LIMIT, 25), // Reduce limit to avoid timeouts
+          order: 'descending'
+        });
       });
+
+      console.log(`Successfully retrieved ${events.data.length} JobSubmitted events`);
 
       // Filter events by wallet address
       const userJobs = events.data.filter((event) => {
-        const eventData = event.parsedJson as {
-          job_id: string;
-          submitter: string;
-          description?: string;
-          [key: string]: string | number | boolean | null | undefined;
-        };
-        return eventData && eventData.submitter === walletAddress;
+        try {
+          const eventData = event.parsedJson as {
+            job_id: string;
+            submitter: string;
+            description?: string;
+            [key: string]: string | number | boolean | null | undefined;
+          };
+          return eventData && eventData.submitter === walletAddress;
+        } catch (parseError) {
+          console.warn('Failed to parse event data:', parseError, event);
+          return false;
+        }
       });
 
+      console.log(`Found ${userJobs.length} jobs submitted by ${walletAddress}`);
       return userJobs as SuiJobEvent[];
+      
     } catch (error) {
-      console.error('Error querying JobSubmitted events:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('Error querying JobSubmitted events:', {
+        error: errorMessage,
+        walletAddress,
+        timestamp: new Date().toISOString()
+      });
+      
+      // For network errors, try alternative approach
+      if (errorMessage.toLowerCase().includes('failed to fetch') || 
+          errorMessage.toLowerCase().includes('network')) {
+        console.warn('Network error detected, trying alternative query approach...');
+        return await this.getJobsSubmittedByAddressFallback(walletAddress);
+      }
+      
+      return [];
+    }
+  }
+
+  /**
+   * Fallback method for querying events with smaller batches
+   */
+  private async getJobsSubmittedByAddressFallback(walletAddress: string): Promise<SuiJobEvent[]> {
+    try {
+      console.log('Using fallback method with smaller query limit...');
+      
+      // Try with very small limit first
+      const events = await this.retryOperation(async () => {
+        return await this.client.queryEvents({
+          query: {
+            MoveEventType: `${PACKAGE_ID}::job_queue::JobSubmitted`
+          },
+          limit: 10, // Much smaller limit
+          order: 'descending'
+        });
+      }, 2, 500); // Fewer retries with shorter delay
+
+      const userJobs = events.data.filter((event) => {
+        try {
+          const eventData = event.parsedJson as {
+            job_id: string;
+            submitter: string;
+            description?: string;
+            [key: string]: string | number | boolean | null | undefined;
+          };
+          return eventData && eventData.submitter === walletAddress;
+        } catch (parseError) {
+          console.warn('Failed to parse event data in fallback:', parseError);
+          return false;
+        }
+      });
+
+      console.log(`Fallback method found ${userJobs.length} jobs submitted by ${walletAddress}`);
+      return userJobs as SuiJobEvent[];
+      
+    } catch (error) {
+      console.error('Fallback method also failed:', error);
       return [];
     }
   }
@@ -503,6 +620,9 @@ export class SuiJobService {
       timestamp: displayTimestamp,
       estimated_duration: estimatedDuration,
       reward_amount: rewardAmount,
+      status: details?.status ?? 0, // Use blockchain status or default to PENDING
+      worker: details?.worker || undefined,
+      result: details?.result || undefined,
       completed: details?.status === SuiJobStatus.COMPLETED || details?.status === SuiJobStatus.VERIFIED
     };
   }
@@ -542,6 +662,7 @@ export class SuiJobService {
               timestamp: this.formatTimestampForDisplay(event.timestampMs),
               estimated_duration: 'N/A',
               reward_amount: 'N/A',
+              status: TASK_STATUS.VERIFIED, // Mark as verified since it's deleted
               completed: true // Mark as completed since it's deleted
             };
             tasks.push(deletedTask);
@@ -564,6 +685,7 @@ export class SuiJobService {
             timestamp: this.formatTimestampForDisplay(event.timestampMs),
             estimated_duration: 'N/A',
             reward_amount: 'N/A',
+            status: TASK_STATUS.PENDING, // Default to pending for failed jobs
             completed: false
           };
           tasks.push(fallbackTask);

@@ -11,7 +11,7 @@ export const fetchTasks = async (): Promise<Task[]> => {
 };
 
 export const createTask = async (
-  taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed'>,
+  taskData: Omit<Task, 'uuid' | 'timestamp' | 'submitter' | 'completed' | 'status'>,
   walletInfo?: WalletInfo
 ): Promise<Task> => {
   return await taskAPI.createTask(taskData, walletInfo);

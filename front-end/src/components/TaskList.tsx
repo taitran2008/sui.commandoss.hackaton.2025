@@ -15,7 +15,7 @@ interface TaskListProps {
 }
 
 export default function TaskList({ hostAddress }: TaskListProps) {
-  const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [filter, setFilter] = useState<'all' | 'active' | 'completed' | 'pending' | 'claimed'>('all');
   const [sortBy, setSortBy] = useState<'timestamp' | 'urgency' | 'reward'>('timestamp');
   
   // Use SUI jobs hook with optional host address
@@ -59,6 +59,10 @@ export default function TaskList({ hostAddress }: TaskListProps) {
       </div>
     );
   }
+
+  // Determine if we should show read-only mode
+  // Read-only when: hostAddress is provided AND user is not connected
+  const isReadOnlyMode = !!hostAddress && !isConnected;
 
   // Show initial loading screen only if we have no tasks and are loading
   if (loading && tasks.length === 0) {
@@ -106,7 +110,10 @@ export default function TaskList({ hostAddress }: TaskListProps) {
               </p>
               {hostAddress && (
                 <p className="text-sm text-blue-600">
-                  📍 Read-only view via URL parameter. Connect your wallet to manage jobs.
+                  {isConnected 
+                    ? "📍 Viewing jobs from another user. You can claim available jobs with your connected wallet."
+                    : "📍 Read-only view via URL parameter. Connect your wallet to manage jobs."
+                  }
                 </p>
               )}
             </div>
@@ -128,8 +135,32 @@ export default function TaskList({ hostAddress }: TaskListProps) {
           </div>
         </div>
 
-        {/* Wallet Connection Section - only show when not using host address */}
-        {!hostAddress && (
+        {/* Wallet Connection Section */}
+        {hostAddress && !isConnected ? (
+          // Show wallet connection when viewing host address but not connected
+          <div className="mb-8">
+            <WalletErrorBoundary>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                  <div>
+                    <div className="text-sm font-medium text-yellow-900">
+                      Connect your wallet to claim jobs from this user
+                    </div>
+                    <div className="text-xs text-yellow-700 mt-1">
+                      You&apos;re viewing jobs from {hostAddress.slice(0, 6)}...{hostAddress.slice(-4)}. Connect your wallet to claim available jobs.
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <WalletConnection />
+                <WalletStatus />
+              </div>
+            </WalletErrorBoundary>
+          </div>
+        ) : !hostAddress ? (
+          // Show wallet connection section only when not using host address
           <div className="mb-8">
             <WalletErrorBoundary>
               <div className="flex items-center justify-between">
@@ -138,20 +169,20 @@ export default function TaskList({ hostAddress }: TaskListProps) {
               </div>
             </WalletErrorBoundary>
           </div>
-        )}
+        ) : null}
 
         {/* Host Address Info - show when using host address */}
-        {hostAddress && (
+        {hostAddress && isConnected && (
           <div className="mb-8">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                 <div>
-                  <div className="text-sm font-medium text-blue-900">
+                  <div className="text-sm font-medium text-green-900">
                     Viewing jobs for address: <span className="font-mono">{hostAddress}</span>
                   </div>
-                  <div className="text-xs text-blue-700 mt-1">
-                    This is a read-only view. To create or manage jobs, connect your wallet.
+                  <div className="text-xs text-green-700 mt-1">
+                    ✅ Your wallet is connected! You can claim and work on available jobs from this user.
                   </div>
                 </div>
               </div>
@@ -160,14 +191,22 @@ export default function TaskList({ hostAddress }: TaskListProps) {
         )}
 
         {/* Stats Dashboard */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
             <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Tasks</h3>
             <p className="text-3xl font-bold text-blue-600">{stats.total}</p>
           </div>
           <div className="bg-white rounded-lg shadow-md p-6">
-            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Active Tasks</h3>
-            <p className="text-3xl font-bold text-orange-600">{stats.active}</p>
+            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Pending</h3>
+            <p className="text-3xl font-bold text-blue-500">{stats.pending}</p>
+          </div>
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Claimed</h3>
+            <p className="text-3xl font-bold text-yellow-600">{stats.claimed}</p>
+          </div>
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Awaiting Verification</h3>
+            <p className="text-3xl font-bold text-purple-600">{stats.awaitingVerification}</p>
           </div>
           <div className="bg-white rounded-lg shadow-md p-6">
             <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide">Completed</h3>
@@ -186,8 +225,8 @@ export default function TaskList({ hostAddress }: TaskListProps) {
 
         {/* Filters and Sorting */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-            <div className="flex gap-2">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setFilter('all')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -195,6 +234,22 @@ export default function TaskList({ hostAddress }: TaskListProps) {
                 }`}
               >
                 All ({tasks.length})
+              </button>
+              <button
+                onClick={() => setFilter('pending')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  filter === 'pending' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Pending ({stats.pending})
+              </button>
+              <button
+                onClick={() => setFilter('claimed')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  filter === 'claimed' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Claimed ({stats.claimed})
               </button>
               <button
                 onClick={() => setFilter('active')}
@@ -272,7 +327,7 @@ export default function TaskList({ hostAddress }: TaskListProps) {
                   onTaskUpdated={handleTaskUpdated}
                   onTaskDeleted={handleTaskDeleted}
                   onJobRefresh={refetch}
-                  readOnly={!!hostAddress}
+                  readOnly={isReadOnlyMode}
                 />
               ))}
             </div>

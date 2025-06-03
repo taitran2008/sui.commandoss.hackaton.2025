@@ -1,6 +1,6 @@
 'use client';
 
-import { Task } from '@/types/task';
+import { Task, TASK_STATUS, TASK_STATUS_LABELS } from '@/types/task';
 import { useState } from 'react';
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { suiJobService } from '@/lib/suiJobService';
@@ -88,6 +88,16 @@ export default function TaskCard({ task, onTaskDeleted, onJobRefresh, readOnly =
     }
   };
 
+  const getStatusColor = (status: number) => {
+    switch (status) {
+      case TASK_STATUS.PENDING: return 'bg-blue-100 text-blue-800';
+      case TASK_STATUS.CLAIMED: return 'bg-yellow-100 text-yellow-800';
+      case TASK_STATUS.COMPLETED: return 'bg-purple-100 text-purple-800';
+      case TASK_STATUS.VERIFIED: return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
   const formatTimestamp = (timestamp: string) => {
     return new Date(timestamp).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -100,27 +110,47 @@ export default function TaskCard({ task, onTaskDeleted, onJobRefresh, readOnly =
 
   return (
     <div className={`bg-white rounded-lg shadow-md p-6 border-l-4 transition-all duration-200 hover:shadow-lg ${
-      task.completed ? 'border-green-500 bg-gray-50' : 'border-blue-500'
+      task.status === TASK_STATUS.VERIFIED ? 'border-green-500 bg-gray-50' : 
+      task.status === TASK_STATUS.COMPLETED ? 'border-purple-500' :
+      task.status === TASK_STATUS.CLAIMED ? 'border-yellow-500' : 'border-blue-500'
     }`}>
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <h3 className={`text-lg font-semibold ${task.completed ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <h3 className={`text-lg font-semibold ${task.status === TASK_STATUS.VERIFIED ? 'text-gray-500 line-through' : 'text-gray-800'}`}>
               {task.task}
             </h3>
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${getUrgencyColor(task.urgency)}`}>
               {task.urgency}
             </span>
-            {task.completed && (
-              <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                Completed
-              </span>
-            )}
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(task.status)}`}>
+              {TASK_STATUS_LABELS[task.status]}
+            </span>
           </div>
           
-          <p className={`text-sm mb-3 ${task.completed ? 'text-gray-400' : 'text-gray-600'}`}>
+          <p className={`text-sm mb-3 ${task.status === TASK_STATUS.VERIFIED ? 'text-gray-400' : 'text-gray-600'}`}>
             {task.description}
           </p>
+
+          {/* Show worker information if task is claimed or beyond */}
+          {task.worker && task.status >= TASK_STATUS.CLAIMED && (
+            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded">
+              <div className="text-xs text-blue-700">
+                <span className="font-medium">Worker:</span>{' '}
+                <AddressDisplay address={task.worker} showCopyButton={true} />
+              </div>
+            </div>
+          )}
+
+          {/* Show result if task is completed */}
+          {task.result && task.status >= TASK_STATUS.COMPLETED && (
+            <div className="mb-3 p-3 bg-gray-50 border border-gray-200 rounded">
+              <div className="text-sm">
+                <span className="font-medium text-gray-700">Work Result:</span>
+                <p className="mt-1 text-gray-600">{task.result}</p>
+              </div>
+            </div>
+          )}
           
           <div className="grid grid-cols-2 gap-4 text-xs text-gray-500">
             <div>
@@ -202,7 +232,7 @@ export default function TaskCard({ task, onTaskDeleted, onJobRefresh, readOnly =
       {readOnly && (
         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="text-sm text-blue-700">
-            <span className="font-medium">👀 Read-only view:</span> Connect your wallet to manage jobs and interact with the blockchain.
+            <span className="font-medium">👀 Read-only view:</span> Connect your wallet to claim jobs and interact with the blockchain.
           </div>
         </div>
       )}

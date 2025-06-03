@@ -1,10 +1,11 @@
 'use client';
 
-import { Task } from '@/types/task';
+import { Task, TASK_STATUS } from '@/types/task';
 import { useState } from 'react';
-import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { useCurrentAccount } from '@mysten/dapp-kit';
 import { suiJobService } from '@/lib/suiJobService';
 import { useToast } from '@/components/ToastProvider';
+import { taskAPI } from '@/lib/taskAPI';
 
 interface JobManagementPanelProps {
   task: Task;
@@ -13,13 +14,14 @@ interface JobManagementPanelProps {
 
 export default function JobManagementPanel({ task, onTaskUpdated }: JobManagementPanelProps) {
   const account = useCurrentAccount();
-  const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction();
   const { addToast } = useToast();
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeOperation, setActiveOperation] = useState<string>('');
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [workResult, setWorkResult] = useState('');
+  const [showWorkForm, setShowWorkForm] = useState(false);
   const [isJobDeleted, setIsJobDeleted] = useState(false);
 
   // Check if job has been deleted from blockchain
@@ -43,90 +45,131 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
     checkIfJobDeleted();
   });
 
-  // Check user permissions
+  // Check user permissions based on new status system
   const isSubmitter = account?.address === task.submitter;
-  const canClaim = !isSubmitter && account?.address && !isJobDeleted;
-  const canReject = isSubmitter && task.completed && !task.completed && !isJobDeleted; // Assuming completed jobs can be rejected
-  const canVerifyAndRelease = isSubmitter && task.completed && !isJobDeleted;
+  const isWorker = account?.address === task.worker;
+  const canClaim = !isSubmitter && account?.address && task.status === TASK_STATUS.PENDING && !isJobDeleted;
+  const canSubmitWork = isWorker && task.status === TASK_STATUS.CLAIMED && !isJobDeleted;
+  const canVerifyWork = isSubmitter && task.status === TASK_STATUS.COMPLETED && !isJobDeleted;
+  const canRejectWork = isSubmitter && task.status === TASK_STATUS.COMPLETED && !isJobDeleted;
 
-  const handleOperation = async (
-    operation: string,
-    operationFn: () => Promise<{ success: boolean; error?: string; jobId?: string }>
-  ) => {
+  const handleClaimJob = async () => {
     if (!account?.address) {
       addToast('Please connect your wallet first', 'error');
       return;
     }
 
     setIsProcessing(true);
-    setActiveOperation(operation);
+    setActiveOperation('Claim Job');
 
     try {
-      const result = await operationFn();
-      
-      if (result.success) {
-        addToast(`${operation} completed successfully!`, 'success');
-        onTaskUpdated();
-      } else {
-        addToast(result.error || `Failed to ${operation.toLowerCase()}`, 'error');
-      }
+      // Use the taskAPI to claim the job
+      await taskAPI.claimTask(task.uuid, account.address);
+      addToast('Job claimed successfully!', 'success');
+      onTaskUpdated();
     } catch (error) {
-      console.error(`Error during ${operation}:`, error);
-      addToast(`Unexpected error during ${operation.toLowerCase()}`, 'error');
+      console.error('Error claiming job:', error);
+      addToast('Failed to claim job', 'error');
     } finally {
       setIsProcessing(false);
       setActiveOperation('');
     }
   };
 
-  const handleClaimJob = () => {
-    handleOperation('Claim Job', () => 
-      suiJobService.claimJob(task.uuid, signAndExecuteTransaction)
-    );
-  };
-
-  const handleCompleteJob = () => {
-    const result = prompt('Enter your work result/completion message:');
-    if (!result) return;
-    
-    // Note: The current completeJob method uses a hardcoded message
-    // You might want to modify it to accept custom completion messages
-    handleOperation('Complete Job', () => 
-      suiJobService.completeJob(task.uuid, signAndExecuteTransaction)
-    );
-  };
-
-  const handleRejectJob = () => {
-    if (!rejectReason.trim()) {
-      addToast('Please provide a rejection reason', 'error');
+  const handleSubmitWork = async () => {
+    if (!workResult.trim()) {
+      addToast('Please provide your work result', 'error');
       return;
     }
 
-    handleOperation('Reject Job', () => 
-      suiJobService.rejectJob(task.uuid, rejectReason, signAndExecuteTransaction)
-    );
+    if (!account?.address) {
+      addToast('Please connect your wallet first', 'error');
+      return;
+    }
 
-    setShowRejectForm(false);
-    setRejectReason('');
+    setIsProcessing(true);
+    setActiveOperation('Submit Work');
+
+    try {
+      // Use the taskAPI to complete the job
+      await taskAPI.completeTask(task.uuid, account.address, workResult);
+      addToast('Work submitted successfully!', 'success');
+      setShowWorkForm(false);
+      setWorkResult('');
+      onTaskUpdated();
+    } catch (error) {
+      console.error('Error submitting work:', error);
+      addToast('Failed to submit work', 'error');
+    } finally {
+      setIsProcessing(false);
+      setActiveOperation('');
+    }
   };
 
-  const handleVerifyAndRelease = () => {
+  const handleVerifyWork = async () => {
     const confirmed = confirm(
       'Are you sure you want to verify this work and release payment? This action cannot be undone.'
     );
     
     if (!confirmed) return;
 
-    handleOperation('Verify & Release Payment', () => 
-      suiJobService.verifyAndRelease(task.uuid, signAndExecuteTransaction)
-    );
+    if (!account?.address) {
+      addToast('Please connect your wallet first', 'error');
+      return;
+    }
+
+    setIsProcessing(true);
+    setActiveOperation('Verify Work');
+
+    try {
+      // Use the taskAPI to verify the job
+      await taskAPI.verifyTask(task.uuid, account.address);
+      addToast('Work verified and payment released!', 'success');
+      onTaskUpdated();
+    } catch (error) {
+      console.error('Error verifying work:', error);
+      addToast('Failed to verify work', 'error');
+    } finally {
+      setIsProcessing(false);
+      setActiveOperation('');
+    }
+  };
+
+  const handleRejectWork = async () => {
+    if (!rejectReason.trim()) {
+      addToast('Please provide a rejection reason', 'error');
+      return;
+    }
+
+    if (!account?.address) {
+      addToast('Please connect your wallet first', 'error');
+      return;
+    }
+
+    setIsProcessing(true);
+    setActiveOperation('Reject Work');
+
+    try {
+      // Use the taskAPI to reject the job
+      await taskAPI.rejectTask(task.uuid, account.address, rejectReason);
+      addToast('Work rejected. Task is now available for claiming again.', 'success');
+      setShowRejectForm(false);
+      setRejectReason('');
+      onTaskUpdated();
+    } catch (error) {
+      console.error('Error rejecting work:', error);
+      addToast('Failed to reject work', 'error');
+    } finally {
+      setIsProcessing(false);
+      setActiveOperation('');
+    }
   };
 
   const getActionButtons = () => {
     const buttons = [];
 
-    // Claim job button (for workers)
-    if (canClaim && !task.completed && !isJobDeleted) {
+    // Claim job button (for workers when task is PENDING)
+    if (canClaim) {
       buttons.push(
         <button
           key="claim"
@@ -146,37 +189,30 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
       );
     }
 
-    // Complete job button (for the worker who claimed it)
-    if (!isSubmitter && task.completed === false && !isJobDeleted) {
+    // Submit work button (for workers when task is CLAIMED)
+    if (canSubmitWork) {
       buttons.push(
         <button
-          key="complete"
-          onClick={handleCompleteJob}
+          key="submit-work"
+          onClick={() => setShowWorkForm(true)}
           disabled={isProcessing}
           className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
         >
-          {activeOperation === 'Complete Job' ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Completing...
-            </>
-          ) : (
-            'Complete Job'
-          )}
+          Submit Work
         </button>
       );
     }
 
-    // Verify & Release button (for job submitter) - only show if job still exists on blockchain
-    if (canVerifyAndRelease) {
+    // Verify work button (for job submitter when task is COMPLETED)
+    if (canVerifyWork) {
       buttons.push(
         <button
           key="verify"
-          onClick={handleVerifyAndRelease}
+          onClick={handleVerifyWork}
           disabled={isProcessing}
           className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
         >
-          {activeOperation === 'Verify & Release Payment' ? (
+          {activeOperation === 'Verify Work' ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               Verifying...
@@ -188,8 +224,8 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
       );
     }
 
-    // Reject job button (for job submitter)
-    if (canReject) {
+    // Reject work button (for job submitter when task is COMPLETED)
+    if (canRejectWork) {
       buttons.push(
         <button
           key="reject"
@@ -219,9 +255,50 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
         {actionButtons}
       </div>
 
+      {/* Work submission form */}
+      {showWorkForm && (
+        <div className="mt-4 p-4 bg-white rounded-md border border-green-200">
+          <h5 className="text-sm font-medium text-gray-800 mb-2">Submit Your Work</h5>
+          <textarea
+            value={workResult}
+            onChange={(e) => setWorkResult(e.target.value)}
+            placeholder="Please describe your work and provide the results..."
+            className="w-full p-2 border border-gray-300 rounded-md text-sm"
+            rows={4}
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={handleSubmitWork}
+              disabled={isProcessing || !workResult.trim()}
+              className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {activeOperation === 'Submit Work' ? (
+                <>
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Submitting...
+                </>
+              ) : (
+                'Submit Work'
+              )}
+            </button>
+            <button
+              onClick={() => {
+                setShowWorkForm(false);
+                setWorkResult('');
+              }}
+              disabled={isProcessing}
+              className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection form */}
       {showRejectForm && (
         <div className="mt-4 p-4 bg-white rounded-md border border-red-200">
-          <h5 className="text-sm font-medium text-gray-800 mb-2">Reject Job</h5>
+          <h5 className="text-sm font-medium text-gray-800 mb-2">Reject Work</h5>
           <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
@@ -231,11 +308,11 @@ export default function JobManagementPanel({ task, onTaskUpdated }: JobManagemen
           />
           <div className="flex gap-2 mt-2">
             <button
-              onClick={handleRejectJob}
+              onClick={handleRejectWork}
               disabled={isProcessing || !rejectReason.trim()}
               className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              {activeOperation === 'Reject Job' ? (
+              {activeOperation === 'Reject Work' ? (
                 <>
                   <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                   Rejecting...

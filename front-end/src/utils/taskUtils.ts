@@ -1,7 +1,7 @@
-import { Task } from '@/types/task';
+import { Task, TASK_STATUS, TaskStatus } from '@/types/task';
 
 /**
- * Utility functions for handling tasks with proper UUID management
+ * Utility functions for handling tasks with proper UUID management and status handling
  */
 
 interface BackendTaskData {
@@ -15,6 +15,9 @@ interface BackendTaskData {
   timestamp: string;
   estimated_duration: string;
   reward_amount: string;
+  status?: TaskStatus;
+  worker?: string;
+  result?: string;
   completed?: boolean;
 }
 
@@ -36,6 +39,9 @@ export const parseTaskFromBackend = (backendData: BackendTaskData): Task => {
     timestamp: backendData.timestamp,
     estimated_duration: backendData.estimated_duration,
     reward_amount: backendData.reward_amount,
+    status: backendData.status ?? TASK_STATUS.PENDING, // Default to PENDING if not provided
+    worker: backendData.worker,
+    result: backendData.result,
     completed: backendData.completed || false
   };
 };
@@ -106,12 +112,20 @@ export const sortTasks = (tasks: Task[], sortBy: 'timestamp' | 'urgency' | 'rewa
   });
 };
 
-export const filterTasks = (tasks: Task[], filter: 'all' | 'active' | 'completed'): Task[] => {
+export const filterTasks = (tasks: Task[], filter: 'all' | 'active' | 'completed' | 'pending' | 'claimed'): Task[] => {
   switch (filter) {
     case 'active':
-      return tasks.filter(task => !task.completed);
+      // Active means not yet verified (PENDING, CLAIMED, COMPLETED)
+      return tasks.filter(task => task.status < TASK_STATUS.VERIFIED);
     case 'completed':
-      return tasks.filter(task => task.completed);
+      // Completed means verified (VERIFIED status)
+      return tasks.filter(task => task.status === TASK_STATUS.VERIFIED);
+    case 'pending':
+      // Available for claiming
+      return tasks.filter(task => task.status === TASK_STATUS.PENDING);
+    case 'claimed':
+      // Currently being worked on
+      return tasks.filter(task => task.status === TASK_STATUS.CLAIMED);
     default:
       return tasks;
   }
@@ -119,12 +133,25 @@ export const filterTasks = (tasks: Task[], filter: 'all' | 'active' | 'completed
 
 export const getTaskStats = (tasks: Task[]) => {
   const total = tasks.length;
-  const completed = tasks.filter(task => task.completed).length;
-  const active = total - completed;
+  // Use status-based calculations instead of legacy completed field
+  const completed = tasks.filter(task => task.status === TASK_STATUS.VERIFIED).length;
+  const active = tasks.filter(task => task.status < TASK_STATUS.VERIFIED).length;
+  const pending = tasks.filter(task => task.status === TASK_STATUS.PENDING).length;
+  const claimed = tasks.filter(task => task.status === TASK_STATUS.CLAIMED).length;
+  const awaitingVerification = tasks.filter(task => task.status === TASK_STATUS.COMPLETED).length;
+
   const totalReward = tasks.reduce((sum, task) => {
     const amount = parseFloat(task.reward_amount.replace(/[^\d.]/g, ''));
     return sum + (isNaN(amount) ? 0 : amount);
   }, 0);
 
-  return { total, completed, active, totalReward };
+  return { 
+    total, 
+    completed, 
+    active, 
+    pending, 
+    claimed, 
+    awaitingVerification, 
+    totalReward 
+  };
 };
