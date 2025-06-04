@@ -138,4 +138,4 @@ smart_contracts/       # Sui Move smart contracts
 ## 🔍 API Documentation
 
 For detailed implementation examples and complete API reference, see:
-- [`queue-monitor/API_DOCUMENTATION_CONCISE.md`](queue-monitor/API_DOCUMENTATION_CONCISE.md)
+- [`smart_contracts/API_DOCUMENTATION_CONCISE.md`](smart_contracts/API_DOCUMENTATION_CONCISE.md)
