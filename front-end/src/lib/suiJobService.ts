@@ -7,10 +7,11 @@
  * 3. Converting SUI job data to UI-compatible Task objects
  */
 
-import { SuiClient } from '@mysten/sui/client';
+import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 import { Task, TASK_STATUS } from '@/types/task';
 import { SUI_CONTRACT_CONFIG, SuiNetwork } from '@/config/sui';
+import { SuiNetworkUtils } from '@/utils/suiNetworkUtils';
 
 // Type for the signAndExecuteTransaction function from @mysten/dapp-kit
 // Using the actual types from the library
@@ -74,72 +75,10 @@ export class SuiJobService {
 
   constructor(network: SuiNetwork = 'testnet') {
     this.network = network;
-    // Use custom RPC URL from configuration for better reliability
-    const rpcUrl = SUI_CONTRACT_CONFIG.networks[network].rpcUrl;
-    this.client = new SuiClient({ url: rpcUrl });
+    this.client = new SuiClient({ url: getFullnodeUrl(network) });
   }
 
-  /**
-   * Test network connectivity and reinitialize client if needed
-   */
-  private async ensureConnectivity(): Promise<void> {
-    try {
-      // Quick connectivity test with a simple query and timeout
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connectivity test timeout')), 3000)
-      );
-      
-      await Promise.race([
-        this.client.getLatestSuiSystemState(),
-        timeoutPromise
-      ]);
-    } catch {
-      console.warn('Primary endpoint seems to be down, trying fallbacks...');
-      await this.initializeFallbackClient();
-    }
-  }
 
-  /**
-   * Initialize client with fallback endpoint
-   */
-  private async initializeFallbackClient(): Promise<void> {
-    const networkConfig = SUI_CONTRACT_CONFIG.networks[this.network] as {
-      rpcUrl: string;
-      explorerUrl: string;
-      fallbackUrls?: string[];
-    };
-    const fallbackUrls = [
-      networkConfig.rpcUrl, // Try primary again
-      ...(networkConfig.fallbackUrls || [])
-    ];
-
-    for (const url of fallbackUrls) {
-      try {
-        console.log(`Trying to connect to: ${url}`);
-        const testClient = new SuiClient({ url });
-        
-        // Test connectivity with a timeout
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Connection timeout')), 5000)
-        );
-        
-        await Promise.race([
-          testClient.getLatestSuiSystemState(),
-          timeoutPromise
-        ]);
-        
-        this.client = testClient;
-        console.log(`✅ Successfully connected to: ${url}`);
-        return;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.warn(`❌ Failed to connect to ${url}: ${errorMessage}`);
-        continue;
-      }
-    }
-    
-    throw new Error('All RPC endpoints are unreachable');
-  }
 
   /**
    * Format timestamp for display in user's local timezone
@@ -283,9 +222,6 @@ export class SuiJobService {
    */
   async getJobDetails(jobId: string): Promise<SuiJobDetails | null> {
     try {
-      // Ensure connectivity before making requests
-      await this.ensureConnectivity();
-      
       // First check if the object exists to avoid the "deleted" error
       const exists = await this.objectExists(jobId);
       if (!exists) {
@@ -299,67 +235,26 @@ export class SuiJobService {
         arguments: [txb.object(jobId)],
       });
 
-      const result = await this.retryOperation(async () => {
-        try {
-          // Add timeout to devInspectTransactionBlock call
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('devInspectTransactionBlock timeout')), 10000)
-          );
-          
-          const inspectPromise = this.client.devInspectTransactionBlock({
-            transactionBlock: txb,
-            sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-          });
-          
-          return await Promise.race([inspectPromise, timeoutPromise]);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('devInspectTransactionBlock error:', errorMessage);
-          
-          // If this is a network error, try reinitializing client with fallback
-          if (errorMessage.toLowerCase().includes('failed to fetch') ||
-              errorMessage.toLowerCase().includes('network error') ||
-              errorMessage.toLowerCase().includes('timeout') ||
-              errorMessage.toLowerCase().includes('fetch')) {
-            console.warn('Network error detected, reinitializing client...');
-            await this.initializeFallbackClient();
-            
-            // Retry with the new client and timeout
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('devInspectTransactionBlock retry timeout')), 10000)
-            );
-            
-            const retryPromise = this.client.devInspectTransactionBlock({
-              transactionBlock: txb,
-              sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-            });
-            
-            return await Promise.race([retryPromise, timeoutPromise]);
-          }
-          
-          throw error;
-        }
-      }, 3, 1000); // More retries with longer delay for network operations
+      const result = await SuiNetworkUtils.devInspectTransactionBlock(
+        this.client,
+        txb,
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+        this.network,
+        10000 // 10 second timeout
+      );
 
-      // Type cast result to the expected DevInspectResults type
-      const devInspectResult = result as {
-        results?: Array<{
-          returnValues?: Array<Array<number>>;
-        }>;
-      };
-
-      if (devInspectResult.results && devInspectResult.results[0] && devInspectResult.results[0].returnValues) {
-        const returnValues = devInspectResult.results[0].returnValues;
+      if (result.results && result.results[0] && result.results[0].returnValues) {
+        const returnValues = result.results[0].returnValues;
         
         // Parse return values: [description, reward_amount, submitter, worker, result, status]
-        const description = returnValues[0] ? Buffer.from((returnValues[0] as number[]).slice(1)).toString('utf8') : '';
+        const description = returnValues[0] ? Buffer.from(returnValues[0][0].slice(1)).toString('utf8') : '';
         const rewardAmount = returnValues[1] ? Number(returnValues[1][0]) : 0;
-        const submitter = returnValues[2] ? '0x' + Buffer.from(returnValues[2] as number[]).toString('hex') : '';
-        const worker = returnValues[3] && (returnValues[3] as number[]).length > 1 ? 
-          '0x' + Buffer.from((returnValues[3] as number[]).slice(1)).toString('hex') : null;
-        const jobResult = returnValues[4] && (returnValues[4] as number[]).length > 1 ? 
-          Buffer.from((returnValues[4] as number[]).slice(1)).toString('utf8') : null;
-        const status = returnValues[5] ? (returnValues[5] as number[])[0] : 0;
+        const submitter = returnValues[2] ? '0x' + Buffer.from(returnValues[2][0]).toString('hex') : '';
+        const worker = returnValues[3] && returnValues[3][0].length > 1 ? 
+          '0x' + Buffer.from(returnValues[3][0].slice(1)).toString('hex') : null;
+        const jobResult = returnValues[4] && returnValues[4][0].length > 1 ? 
+          Buffer.from(returnValues[4][0].slice(1)).toString('utf8') : null;
+        const status = returnValues[5] ? returnValues[5][0][0] : 0;
 
         return {
           description,
@@ -377,7 +272,7 @@ export class SuiJobService {
         console.log(`Job ${jobId} has been deleted`);
         return null;
       }
-      console.error(`Error getting job details for ${jobId}:`, errorMessage);
+      console.error(`Error getting job details for ${jobId}:`, error);
       return null;
     }
     return null;
@@ -401,12 +296,13 @@ export class SuiJobService {
         arguments: [txb.object(jobId)],
       });
 
-      const result = await this.retryOperation(async () => {
-        return await this.client.devInspectTransactionBlock({
-          transactionBlock: txb,
-          sender: '0x0000000000000000000000000000000000000000000000000000000000000000',
-        });
-      }, 2, 500); // Shorter retry for devInspect calls
+      const result = await SuiNetworkUtils.devInspectTransactionBlock(
+        this.client,
+        txb,
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+        this.network,
+        10000 // 10 second timeout
+      );
 
       if (result.results && result.results[0] && result.results[0].returnValues) {
         const returnValues = result.results[0].returnValues;
@@ -464,22 +360,15 @@ export class SuiJobService {
                                 errorMessage.includes('fetch') ||
                                 errorMessage.includes('network') ||
                                 errorMessage.includes('econnreset') ||
-                                errorMessage.includes('enotfound') ||
-                                errorMessage.includes('socket') ||
-                                errorMessage.includes('cors') ||
-                                errorMessage.includes('aborted');
+                                errorMessage.includes('enotfound');
         
         if (!isRetryableError || attempt === maxRetries) {
-          console.error(`Operation failed after ${attempt + 1} attempts:`, errorMessage);
           throw lastError;
         }
         
         // Exponential backoff with jitter
-        const delay = Math.min(
-          initialDelay * Math.pow(2, attempt) + Math.random() * 1000,
-          10000 // Cap at 10 seconds
-        );
-        console.warn(`Attempt ${attempt + 1} failed, retrying in ${Math.round(delay)}ms...`, errorMessage);
+        const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
+        console.warn(`Attempt ${attempt + 1} failed, retrying in ${delay}ms...`, errorMessage);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -1206,28 +1095,6 @@ export class SuiJobService {
       case 2: return 'COMPLETED';
       case 3: return 'VERIFIED';
       default: return `UNKNOWN(${status})`;
-    }
-  }
-
-  /**
-   * Check if the service is healthy and can connect to the network
-   */
-  async healthCheck(): Promise<{ healthy: boolean; network: string; latency?: number }> {
-    const startTime = Date.now();
-    try {
-      await this.client.getLatestSuiSystemState();
-      const latency = Date.now() - startTime;
-      return {
-        healthy: true,
-        network: this.network,
-        latency
-      };
-    } catch (error) {
-      console.error('Health check failed:', error);
-      return {
-        healthy: false,
-        network: this.network
-      };
     }
   }
 }

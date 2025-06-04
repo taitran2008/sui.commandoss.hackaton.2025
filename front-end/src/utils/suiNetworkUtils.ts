@@ -5,8 +5,9 @@
  * with retry logic, timeout handling, and fallback mechanisms.
  */
 
-import { SuiClient } from '@mysten/sui/client';
+import { SuiClient, DevInspectResults } from '@mysten/sui/client';
 import { SUI_CONTRACT_CONFIG, SuiNetwork } from '@/config/sui-config';
+import { Transaction } from '@mysten/sui/transactions';
 
 export class SuiNetworkUtils {
   private static fallbackClients: Map<SuiNetwork, SuiClient> = new Map();
@@ -158,6 +159,65 @@ export class SuiNetworkUtils {
         throw error;
       }
     }, 3, 1000);
+  }
+
+  /**
+   * Robust devInspectTransactionBlock with retry logic and fallback
+   */
+  static async devInspectTransactionBlock(
+    client: SuiClient,
+    transactionBlock: Transaction,
+    sender: string = '0x0000000000000000000000000000000000000000000000000000000000000000',
+    network: SuiNetwork = 'testnet',
+    timeoutMs: number = 10000
+  ): Promise<DevInspectResults> {
+    return await this.retryOperation(async () => {
+      try {
+        // Try with timeout protection
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('devInspectTransactionBlock timeout')), timeoutMs)
+        );
+        
+        const result = await Promise.race([
+          client.devInspectTransactionBlock({
+            transactionBlock,
+            sender,
+          }),
+          timeoutPromise
+        ]);
+        
+        return result as DevInspectResults;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        // If it's a network error, try fallback client
+        if (errorMessage.includes('failed to fetch') || 
+            errorMessage.includes('timeout') || 
+            errorMessage.includes('network') ||
+            errorMessage.includes('connection') ||
+            errorMessage.includes('econnreset') ||
+            errorMessage.includes('abort')) {
+          console.warn('🔄 Primary client failed for devInspectTransactionBlock, trying fallback...', errorMessage);
+          const fallbackClient = await this.getFallbackClient(network);
+          
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('devInspectTransactionBlock fallback timeout')), timeoutMs)
+          );
+          
+          const result = await Promise.race([
+            fallbackClient.devInspectTransactionBlock({
+              transactionBlock,
+              sender,
+            }),
+            timeoutPromise
+          ]);
+          
+          return result as DevInspectResults;
+        }
+        
+        throw error;
+      }
+    }, 3, 1000); // 3 retries with exponential backoff starting at 1000ms
   }
 
   /**

@@ -1,15 +1,17 @@
 # Decentralized Job Queue System
 
-A decentralized job queue system built on the Sui Blockchain, enabling trustless job posting, claiming, completion, and payment verification.
+A decentralized job queue system built on the Sui Blockchain, enabling trustless job posting, claiming, completion, and payment verification. Built for Command OSS Hackathon 2025 in less than 48 hours.
+
 
 ## 🌐 Live Deployments
 
-- **Web2 Link**: https://dptm8b098wb3y.cloudfront.net/
+- **Web2 Link**: https://dptm8b098wb3y.cloudfront.net/ or https://djobs.taitran.app/
 - **Web3 Link (IPFS)**: 
   - http://k51qzi5uqu5dlm9k7sqk5b1s2v7ns2mbdrn9no1jdsoy1bli1c4ots18sp32ov.ipns.localhost:8080/
   - https://ipfs.golinky.me/
 - **Share list job to your workers** append your wallet address to the URL: 
   - https://dptm8b098wb3y.cloudfront.net/?host=0xaa48fcc27ae97f7eeeb9c45959174ed0ab8e22233ba366e6e09cf42c919578de
+  - https://djobs.taitran.app/?host=0xaa48fcc27ae97f7eeeb9c45959174ed0ab8e22233ba366e6e09cf42c919578de
 
 ## 📦 Tech Stack:
 - **Frontend**: Next.js, React, Tailwind CSS
